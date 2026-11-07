@@ -45,6 +45,7 @@ type ReadModelCacheSet struct {
 
 type UserProjectionFactReadModelCache interface {
 	InvalidateAccountFreezeFact(userID int64)
+	InvalidateCollectiblePhoneFact(userID int64)
 	FlushUserProjectionFactReadModel()
 }
 
@@ -435,6 +436,7 @@ func (l *ReadModelChangeListener) handlePayload(payload string) {
 			// caches until unrelated LRU pressure removes them.
 			if l.caches.UserProjectionFacts != nil {
 				l.caches.UserProjectionFacts.InvalidateAccountFreezeFact(evt.PeerID)
+				l.caches.UserProjectionFacts.InvalidateCollectiblePhoneFact(evt.PeerID)
 			}
 			if l.caches.PeerIdentities != nil {
 				l.caches.PeerIdentities.InvalidatePeerIdentityReadModel(domain.Peer{Type: domain.PeerTypeUser, ID: evt.PeerID})
@@ -460,6 +462,10 @@ func (l *ReadModelChangeListener) handlePayload(payload string) {
 			if cache, ok := l.caches.Privacy.(PrivacyViewerFactsReadModelCache); ok {
 				cache.InvalidateViewerFacts(evt.PeerID)
 			}
+		}
+	case "user_collectible_phone":
+		if evt.PeerType == "user" && evt.PeerID != 0 && l.caches.UserProjectionFacts != nil {
+			l.caches.UserProjectionFacts.InvalidateCollectiblePhoneFact(evt.PeerID)
 		}
 	case "user_visibility":
 		if evt.PeerType == "user" && evt.PeerID != 0 {
