@@ -305,6 +305,7 @@ type BaseUserBotStatusProvider interface {
 
 type UserProjectionFactInvalidator interface {
 	InvalidateAccountFreezeFact(userID int64)
+	InvalidateCollectiblePhoneFact(userID int64)
 }
 
 // TelegramLoginService is the domain-only boundary shared by the MTProto RPC
