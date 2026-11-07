@@ -11,6 +11,10 @@ Smail Gram is a self-hosted server fork. Operators are responsible for protectin
 - Review all optional integrations before enabling them. In particular, custodial crypto donations are disabled by default. Enabling them creates operational responsibility for wallet encryption keys, recovery phrases, chain configuration, and funds.
 - Keep the server, operating system, database, and reverse-proxy software updated. Review logs for unexpected authentication and administrator activity.
 
+## Admin-panel credentials
+
+Named admin-console accounts require passwords of at least 15 Unicode characters and no more than 72 UTF-8 bytes (bcrypt's input limit). Prefer a randomly generated passphrase from a password manager. This policy applies when creating or resetting named operator passwords; it does not silently rewrite existing password hashes. MFA is not implemented yet, so keep the panel on loopback or behind HTTPS plus a separate access-control layer, and do not treat the password rule as a substitute for MFA.
+
 ## Custodial donations
 
 `TELESRV_DONATIONS_ENABLED` defaults to `false`. Set it to `true` only after reviewing the implementation and operational model, securely backing up the wallet encryption key and recovery material, and validating the configured chains and RPC endpoints. Disabling the feature does not delete an existing wallet or its funds; it leaves them dormant.
