@@ -82,6 +82,9 @@ func (r *Router) NotifyUserChanged(ctx context.Context, u domain.User) error {
 	if r == nil || u.ID == 0 {
 		return nil
 	}
+	if r.deps.UserProjectionFacts != nil {
+		r.deps.UserProjectionFacts.InvalidateCollectiblePhoneFact(u.ID)
+	}
 	r.invalidateRPCProjectionForUser(u.ID)
 	r.pushPremiumStatusUpdate(ctx, u)
 	return nil
