@@ -329,3 +329,34 @@ func TestEscapeLikePatternKeepsUsernameSearchLiteral(t *testing.T) {
 		t.Fatalf("escapeLikePattern empty = %q", got)
 	}
 }
+
+
+func TestAdminCookiesSetSecureAttributeWhenConfigured(t *testing.T) {
+	rec := httptest.NewRecorder()
+	setCSRFCookie(rec, "csrf-token", time.Hour, true)
+	csrf := rec.Result().Cookies()
+	if len(csrf) != 1 || csrf[0].Name != csrfCookieName || !csrf[0].Secure {
+		t.Fatalf("CSRF cookie = %+v, want Secure=true", csrf)
+	}
+
+	rec = httptest.NewRecorder()
+	clearSessionCookie(rec, true)
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 2 {
+		t.Fatalf("clear cookies = %d, want 2", len(cookies))
+	}
+	for _, cookie := range cookies {
+		if !cookie.Secure || cookie.MaxAge >= 0 {
+			t.Fatalf("clearing cookie = %+v, want Secure and expired", cookie)
+		}
+	}
+}
+
+func TestAdminCookiesRemainUsableForLoopbackHTTPDevelopment(t *testing.T) {
+	rec := httptest.NewRecorder()
+	setCSRFCookie(rec, "csrf-token", time.Hour, false)
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Secure {
+		t.Fatalf("development CSRF cookie = %+v, want Secure=false", cookies)
+	}
+}
