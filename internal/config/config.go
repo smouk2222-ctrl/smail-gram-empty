@@ -170,10 +170,11 @@ type Config struct {
 	TelegramLoginSweepInterval     time.Duration
 	TelegramLoginSweepBatch        int
 	// Admin UI 独立进程配置项保留在统一配置中，cmd/telesrv-admin 也按同名 env 读取。
-	AdminUIAddr     string
-	AdminUIPassword string
-	AdminUIToken    string
-	AdminSessionKey string
+	AdminUIAddr         string
+	AdminUIPassword     string
+	AdminUIToken        string
+	AdminSessionKey     string
+	AdminUICookieSecure bool
 	// AdminUIPermissions is the permission set granted to a panel session that
 	// authenticated with TELESRV_ADMIN_UI_PASSWORD / _TOKEN. The single entry "*"
 	// means "every permission" and is the shipped default, so enabling RBAC never
@@ -1108,6 +1109,7 @@ func Load() (Config, error) {
 		AdminUIPermissions:             envListOr("TELESRV_ADMIN_UI_PERMISSIONS", []string{adminPermissionAll}),
 		AdminScopedTokens:              adminScopedTokens,
 		AdminUIAddr:                    envOr("TELESRV_ADMIN_UI_ADDR", "127.0.0.1:2600"),
+		AdminUICookieSecure:            envBoolOr("TELESRV_ADMIN_UI_COOKIE_SECURE", false),
 		AdminUIPassword:                envOr("TELESRV_ADMIN_UI_PASSWORD", ""),
 		AdminUIToken:                   envOr("TELESRV_ADMIN_UI_TOKEN", ""),
 		AdminSessionKey:                envOr("TELESRV_ADMIN_SESSION_KEY", ""),
