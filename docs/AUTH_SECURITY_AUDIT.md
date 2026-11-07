@@ -47,7 +47,7 @@ Both cookies set Secure automatically for direct TLS requests, or when `TELESRV_
 
 ### 6. Admin-panel accounts have no second factor or self-service recovery path
 
-The observed panel login accepts a username plus password for named operators, or the configured break-glass password/token. The login handler does not require TOTP, passkey, or another second factor. The operator-management API can reset another operator's password, but no self-service recovery flow is present in these files.
+The observed panel login accepts a username plus password for named operators, or the configured break-glass password/token. Named operator password creation and reset now require at least 15 Unicode characters (bcrypt maximum: 72 bytes). Existing hashes are not migrated or invalidated by this policy change. The login handler does not require TOTP, passkey, or another second factor. The operator-management API can reset another operator's password, but no self-service recovery flow is present in these files.
 
 MFA is not implemented on this branch. For a public or internet-reachable admin panel, require MFA for named operators and keep the break-glass credential offline/strongly protected. A safe implementation must cover enrollment, secret storage, challenge verification, recovery codes, revocation, session invalidation, and UI/API flows together; adding only a TOTP check to the login handler would create lockout and downgrade paths. Loss of all operator credentials requires out-of-band recovery by the server owner. End-user Telegram 2FA/passkeys do not automatically protect this separate admin console.
 
