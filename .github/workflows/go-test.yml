@@ -8,12 +8,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Keep only the newest validation for a PR/ref. Older queued test runs are
+# redundant and can delay feedback after a branch receives several commits.
+concurrency:
+  group: go-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out source
         uses: actions/checkout@v4
