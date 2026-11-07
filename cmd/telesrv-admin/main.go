@@ -102,6 +102,7 @@ type uiConfig struct {
 	Password      string
 	Token         string
 	SessionKey    []byte
+	CookieSecure  bool
 	// DiskStatsPath points the dashboard host-disk sampler at the local path
 	// that matters for the selected blob backend: permanent localfs storage or
 	// the S3 upload spool.
@@ -216,6 +217,7 @@ func loadConfig() (uiConfig, error) {
 		Password:                   appCfg.AdminUIPassword,
 		Token:                      appCfg.AdminUIToken,
 		SessionKey:                 sum[:],
+		CookieSecure:               appCfg.AdminUICookieSecure,
 		DiskStatsPath:              dashboardDiskPath(appCfg),
 		Permissions:                appCfg.AdminUIPermissions,
 		HideThirdPartyVerification: appCfg.HideThirdPartyVerification,
