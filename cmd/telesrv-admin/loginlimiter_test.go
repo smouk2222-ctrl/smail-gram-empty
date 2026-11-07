@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -20,8 +21,8 @@ func TestLoginAttemptLimiterEnforcesUsernameAndIPBudgets(t *testing.T) {
 	}
 
 	// Different usernames and source ports still share the same IP budget.
-	for i := adminLoginPerUserLimit; i < adminLoginPerIPLimit; i++ {
-		if ok, wait := limiter.allow("192.0.2.10:3000", "other-"+string(rune('a'+i)), now); !ok || wait != 0 {
+	for i := adminLoginPerUserLimit; i < adminLoginPerIPLimit-1; i++ {
+		if ok, wait := limiter.allow("192.0.2.10:3000", "other-"+strconv.Itoa(i), now); !ok || wait != 0 {
 			t.Fatalf("IP attempt %d unexpectedly denied: wait=%s", i+1, wait)
 		}
 	}
