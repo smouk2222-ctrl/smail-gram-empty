@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -135,7 +136,7 @@ var exportAuthSecret = func() []byte {
 func signExportAuthToken(userID int64) []byte {
 	payload := make([]byte, 16, 48)
 	binary.BigEndian.PutUint64(payload[0:8], uint64(userID))
-	binary.BigEndian.PutUint64(payload[8:16], uint64(time.Now().Add(exportAuthTokenTTL).Unix()))
+	binary.BigEndian.PutUint64(payload[8:16], uint64(time.Now().Add(exportAuthTokenTTL).UnixNano()))
 	mac := hmac.New(sha256.New, exportAuthSecret)
 	mac.Write(payload)
 	return mac.Sum(payload)
@@ -154,10 +155,44 @@ func verifyExportAuthToken(token []byte) (int64, error) {
 		return 0, errors.New("export auth token: bad signature")
 	}
 	expiry := int64(binary.BigEndian.Uint64(payload[8:16]))
-	if time.Now().Unix() > expiry {
+	now := time.Now().UnixNano()
+	if now >= expiry {
 		return 0, errors.New("export auth token: expired")
 	}
-	return int64(binary.BigEndian.Uint64(payload[0:8])), nil
+	if !consumeExportAuthToken(token, expiry, now) {
+		return 0, errors.New("export auth token: already used or replay cache full")
+	}
+	userID := int64(binary.BigEndian.Uint64(payload[0:8]))
+	if userID <= 0 {
+		return 0, errors.New("export auth token: invalid user")
+	}
+	return userID, nil
+}
+
+const exportAuthTokenReplayMaxEntries = 262144
+
+var exportAuthTokenReplay = struct {
+	mu sync.Mutex
+	used map[[32]byte]int64
+}{}
+
+func consumeExportAuthToken(token []byte, expiry, now int64) bool {
+	digest := sha256.Sum256(token)
+	exportAuthTokenReplay.mu.Lock()
+	defer exportAuthTokenReplay.mu.Unlock()
+	if exportAuthTokenReplay.used == nil {
+		exportAuthTokenReplay.used = make(map[[32]byte]int64)
+	}
+	for key, expiresAt := range exportAuthTokenReplay.used {
+		if expiresAt <= now {
+			delete(exportAuthTokenReplay.used, key)
+		}
+	}
+	if _, exists := exportAuthTokenReplay.used[digest]; exists || len(exportAuthTokenReplay.used) >= exportAuthTokenReplayMaxEntries {
+		return false
+	}
+	exportAuthTokenReplay.used[digest] = expiry
+	return true
 }
 
 // onAuthExportAuthorization issues a short-lived signed token proving the
