@@ -1727,7 +1727,6 @@ func disableDefaultConfigFile(t *testing.T) {
 	t.Setenv("TELESRV_CONFIG", "")
 }
 
-
 func TestLoadDonationsDisabledByDefaultAndExplicitOptIn(t *testing.T) {
 	for _, test := range []struct {
 		name string
