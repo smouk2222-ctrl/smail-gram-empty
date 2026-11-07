@@ -38,5 +38,10 @@ jobs:
       # result even if unrelated packages in the full repository suite fail.
       - name: Test admin console
         run: go test ./cmd/telesrv-admin
+      - name: Build server executables
+        run: |
+          go build ./cmd/telesrv
+          go build ./cmd/telesrv-admin
+          go build ./cmd/owpengram-ctl
       - name: Run full test suite
         run: go test ./...
