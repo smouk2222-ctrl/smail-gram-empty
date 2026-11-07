@@ -2,6 +2,15 @@ name: Build Linux server binaries
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - "smail-gram/security-defaults"
+    paths:
+      - ".github/workflows/build-server-binaries.yml"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/telesrv-admin/web/**"
   pull_request:
     paths:
       - ".github/workflows/build-server-binaries.yml"
