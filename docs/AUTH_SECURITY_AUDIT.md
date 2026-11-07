@@ -48,7 +48,9 @@ For a public or internet-reachable admin panel, require MFA for named operators 
 
 - Replace development OTP with a real delivery provider; validate webhook authentication, TLS, timeouts, and secret rotation.
 - Set the correct passkey RP ID and allowed origins for the deployment's own domain.
-- Keep the Admin UI on loopback or behind a hardened HTTPS reverse proxy and additional access control.
+- Keep the Admin UI on loopback or behind a hardened HTTPS reverse proxy and additional access control; set `TELESRV_ADMIN_UI_COOKIE_SECURE=true` behind TLS termination.
+- The panel login limiter is process-local; apply matching proxy-level limits when running multiple replicas.
+- MFA for panel operators remains a required follow-up before internet exposure; end-user Telegram 2FA does not protect the admin console.
 - Use unique administrator credentials and a strong session key; keep all secrets and recovery material outside Git.
 - Test login, 2FA, passkey, session revocation, password recovery, and account deletion against a non-production database before opening registration.
 - Run the complete Go test suite and review all CI results before merging.
