@@ -26,7 +26,16 @@ Before relying on this flow in a public deployment, confirm the intended MTProto
 
 ### 3. auth.dropTempAuthKeys currently acknowledges without dropping keys
 
-The registered handler for `auth.dropTempAuthKeys` currently ignores `except_auth_keys` and returns `true`. This is a protocol-compatibility gap: callers are told the request succeeded, but the handler does not perform the requested cleanup. Review the temp-key lifecycle and implement the expected behavior with tests, or explicitly document the method as unsupported rather than silently acknowledging a no-op.
+The registered handler for `auth.dropTempAuthKeys` currently ignores `except_auth_keys` and returns `true`. This is a protocol-compatibility gap: callers are told the request succeeded, but the handler does not perform the requested cleanup.
+
+The storage model makes a naive implementation unsafe:
+
+- `auth_keys.expires_at = 0` identifies permanent keys; a positive value identifies temporary keys; `-1` is a migration-only legacy/unknown value that the edge rejects. The protocol key row is the authoritative source of this classification.
+- `temp_auth_key_bindings` records only a temporary-to-permanent binding. A temporary key that has not yet been bound has no user/owner relationship in the current schema.
+- `AuthKeyStore.Delete` is a physical-key destruction primitive. For a permanent key it also deletes every temporary key bound to that permanent key and associated update state. It is not a suitable implementation of a request that merely drops selected temporary keys.
+- Physical deletion must be coordinated with active raw sessions and the activation/revalidation fence. Deleting rows based only on `expires_at` or a guessed current-user association could terminate another user's unbound handshake or race a connection becoming active.
+
+Therefore this handler is deliberately left unchanged pending a protocol-scope decision. Before implementing it, verify the exact MTProto semantics for the calling authorization, define how unbound temporary keys are associated with that caller (or prove the operation is intentionally global), add a store operation with an explicit except-list and transaction/locking guarantees, fence and close only the targeted raw sessions, and test concurrent activation, binding, deletion, and cross-user isolation. Until then, returning `true` is misleading and should be treated as a known compatibility defect—not as completed cleanup.
 
 ### 4. Admin login limiter deployment boundary
 
