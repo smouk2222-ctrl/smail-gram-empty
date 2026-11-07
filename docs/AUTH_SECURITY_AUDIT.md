@@ -30,13 +30,13 @@ The registered handler for `auth.dropTempAuthKeys` currently ignores `except_aut
 
 `POST /api/login` is registered directly to `handleAPILogin`. The handler performs password authentication (including bcrypt work and a dummy hash for unknown usernames), but the route and login handler contain no attempt counter, cooldown, or IP/account rate limiter. The main HTTP server also does not wrap the mux in a login-specific limiter.
 
-This is a confirmed source-level gap, not proof that a particular deployment is currently exploitable: a reverse proxy or firewall may add throttling outside this process. Before exposing the panel beyond loopback, add a bounded, concurrency-safe limiter (at minimum by source IP and normalized username) and configure equivalent proxy-level protection. Avoid permanent account lockouts that let an attacker deny service to an operator.
+This is a confirmed source-level gap, not proof that a particular deployment is currently exploitable: a reverse proxy or firewall may add throttling outside this process. Implemented on this branch: a bounded, concurrency-safe in-process limiter counts attempts by source IP and by IP+normalized username. It returns HTTP 429 with Retry-After after 20 attempts per IP or 5 attempts per IP/username in a 15-minute window. It uses RemoteAddr only and deliberately does not trust arbitrary X-Forwarded-For headers. This is process-local; multi-replica deployments still need proxy-level rate limiting. Avoid permanent account lockouts that let an attacker deny service to an operator.
 
 ### 5. Admin session cookies do not set the Secure attribute
 
 The session cookie and readable CSRF cookie are created without `Secure: true`; the clear-cookie helpers omit it too. If the panel is published on a hostname that is also reachable over plain HTTP, browsers may send the session cookie over that connection. A TLS reverse proxy alone does not automatically add the attribute.
 
-Add an explicit production setting or a safely configured HTTPS-aware mechanism so both cookies are Secure in HTTPS deployments. Keep local HTTP development possible, and ensure the proxy preserves the original host/scheme correctly. The session cookie is already HttpOnly and SameSite=Lax; the CSRF cookie is intentionally readable by the panel script.
+Implemented on this branch: both cookies now set Secure automatically for direct TLS requests, or when `TELESRV_ADMIN_UI_COOKIE_SECURE=true` is configured (required when TLS terminates at a reverse proxy). The default remains false for the loopback plain-HTTP development setup; set it to true for any HTTPS deployment. The session cookie is HttpOnly and SameSite=Lax; the CSRF cookie is intentionally readable by the panel script.
 
 ### 6. Admin-panel accounts have no second factor or self-service recovery path in the login flow
 
