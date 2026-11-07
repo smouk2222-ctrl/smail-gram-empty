@@ -1726,3 +1726,28 @@ func disableDefaultConfigFile(t *testing.T) {
 	t.Helper()
 	t.Setenv("TELESRV_CONFIG", "")
 }
+
+
+func TestLoadDonationsDisabledByDefaultAndExplicitOptIn(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		env  string
+		want bool
+	}{
+		{name: "default disabled", env: "", want: false},
+		{name: "explicit opt in", env: "true", want: true},
+		{name: "explicit opt out", env: "false", want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			disableDefaultConfigFile(t)
+			t.Setenv("TELESRV_DONATIONS_ENABLED", test.env)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.DonationsEnabled != test.want {
+				t.Fatalf("DonationsEnabled = %v, want %v", cfg.DonationsEnabled, test.want)
+			}
+		})
+	}
+}
