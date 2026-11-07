@@ -1,0 +1,41 @@
+name: Build Star Gift Packs
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/gift-packs.yml"
+      - "docs/gift-packs.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out pinned gift-pack source
+        uses: actions/checkout@v4
+        with:
+          repository: owpengram/owpengram-giftpacks
+          ref: ce1803af1b7d8dc869926022373c2bf30e69f382
+          path: giftpacks
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+
+      - name: Lint animations and export archives
+        working-directory: giftpacks
+        run: ./build-packs.sh -o ../dist/packs
+
+      - name: Upload ready-to-import gift packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-gift-packs
+          path: dist/packs/*.zip
+          if-no-files-found: error
+          retention-days: 14
