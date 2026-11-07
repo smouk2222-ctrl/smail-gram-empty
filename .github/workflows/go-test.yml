@@ -34,5 +34,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Run tests
+      # Keep the security-sensitive admin console tests visible as their own
+      # result even if unrelated packages in the full repository suite fail.
+      - name: Test admin console
+        run: go test ./cmd/telesrv-admin
+      - name: Run full test suite
         run: go test ./...
