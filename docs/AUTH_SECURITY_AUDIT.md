@@ -26,6 +26,24 @@ Before relying on this flow in a public deployment, confirm the intended MTProto
 
 The registered handler for `auth.dropTempAuthKeys` currently ignores `except_auth_keys` and returns `true`. This is a protocol-compatibility gap: callers are told the request succeeded, but the handler does not perform the requested cleanup. Review the temp-key lifecycle and implement the expected behavior with tests, or explicitly document the method as unsupported rather than silently acknowledging a no-op.
 
+### 4. Admin-panel login has no application-level rate limit
+
+`POST /api/login` is registered directly to `handleAPILogin`. The handler performs password authentication (including bcrypt work and a dummy hash for unknown usernames), but the route and login handler contain no attempt counter, cooldown, or IP/account rate limiter. The main HTTP server also does not wrap the mux in a login-specific limiter.
+
+This is a confirmed source-level gap, not proof that a particular deployment is currently exploitable: a reverse proxy or firewall may add throttling outside this process. Before exposing the panel beyond loopback, add a bounded, concurrency-safe limiter (at minimum by source IP and normalized username) and configure equivalent proxy-level protection. Avoid permanent account lockouts that let an attacker deny service to an operator.
+
+### 5. Admin session cookies do not set the Secure attribute
+
+The session cookie and readable CSRF cookie are created without `Secure: true`; the clear-cookie helpers omit it too. If the panel is published on a hostname that is also reachable over plain HTTP, browsers may send the session cookie over that connection. A TLS reverse proxy alone does not automatically add the attribute.
+
+Add an explicit production setting or a safely configured HTTPS-aware mechanism so both cookies are Secure in HTTPS deployments. Keep local HTTP development possible, and ensure the proxy preserves the original host/scheme correctly. The session cookie is already HttpOnly and SameSite=Lax; the CSRF cookie is intentionally readable by the panel script.
+
+### 6. Admin-panel accounts have no second factor or self-service recovery path in the login flow
+
+The observed panel login accepts a username plus password for named operators, or the configured break-glass password/token. The login handler does not require TOTP, passkey, or another second factor. The operator-management API can reset another operator's password, but no self-service recovery flow is present in these files.
+
+For a public or internet-reachable admin panel, require MFA for named operators and keep the break-glass credential offline/strongly protected. Document that loss of all operator credentials requires out-of-band recovery by the server owner; do not imply that end-user Telegram 2FA/passkeys automatically protect the separate admin console.
+
 ## Deployment checklist
 
 - Replace development OTP with a real delivery provider; validate webhook authentication, TLS, timeouts, and secret rotation.
