@@ -18,6 +18,9 @@ func TestExportAuthTokenRoundTrip(t *testing.T) {
 	if got != userID {
 		t.Fatalf("got userID %d, want %d", got, userID)
 	}
+	if _, err := verifyExportAuthToken(token); err == nil {
+		t.Fatal("expected reused export auth token to fail")
+	}
 }
 
 func TestExportAuthTokenRejectsTampering(t *testing.T) {
@@ -40,7 +43,7 @@ func TestExportAuthTokenRejectsExpired(t *testing.T) {
 	// (as opposed to the HMAC check).
 	payload := make([]byte, 16, 48)
 	binary.BigEndian.PutUint64(payload[0:8], uint64(1780243201))
-	binary.BigEndian.PutUint64(payload[8:16], uint64(time.Now().Add(-time.Minute).Unix()))
+	binary.BigEndian.PutUint64(payload[8:16], uint64(time.Now().Add(-time.Minute).UnixNano()))
 	mac := hmac.New(sha256.New, exportAuthSecret)
 	mac.Write(payload)
 	token := mac.Sum(payload)
