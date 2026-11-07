@@ -84,7 +84,7 @@ func (s *Service) OnInlineQuery(ctx context.Context, botUserID, _ int64, query, 
 	}
 	for _, entry := range entries {
 		if _, ok := byID[entry.DocumentID]; !ok {
-			return domain.BotInlineResults{}, false, fmt.Errorf("gif catalog entry %d references missing document %d", entry.ID, entry.DocumentID)
+			return domain.BotInlineResults{}, true, fmt.Errorf("gif catalog entry %d references missing document %d", entry.ID, entry.DocumentID)
 		}
 	}
 	results := make([]domain.BotInlineResult, 0, len(entries))
