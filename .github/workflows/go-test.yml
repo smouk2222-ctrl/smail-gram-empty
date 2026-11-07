@@ -17,6 +17,11 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          # Test the immutable PR head SHA. GitHub can retire an old synthetic
+          # merge ref while queued runs wait behind other jobs, making checkout
+          # fail before tests even start.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
