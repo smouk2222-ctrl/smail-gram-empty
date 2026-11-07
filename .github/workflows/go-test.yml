@@ -1,8 +1,10 @@
 name: Go tests
 
 on:
+  # The PR event already tests every topic-branch push. Restrict push runs
+  # to main so each commit on an open PR does not enqueue the same suite twice.
   push:
-    branches: ["main", "smail-gram/**"]
+    branches: ["main"]
   pull_request:
   workflow_dispatch:
 
