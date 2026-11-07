@@ -9,6 +9,8 @@ This is a source-level review, not a penetration test. Findings below describe b
 - Two-step verification uses a `password_pending` authorization state. Normal authenticated-user lookup rejects that state until the password check completes.
 - Authorization revocation removes the authorization, invalidates router caches, closes active sessions, and clears associated update state.
 - Passkey login verifies the credential before binding an authorization.
+- Admin-panel login attempts are rate-limited in-process on this branch: 5 attempts per IP+username and 20 per IP per 15-minute window. The limiter is bounded and concurrency-safe; it trusts `RemoteAddr`, not arbitrary forwarding headers.
+- Admin session and CSRF cookies set `Secure` for direct TLS or when `TELESRV_ADMIN_UI_COOKIE_SECURE=true` is configured for TLS-terminating proxies.
 
 ## Items requiring follow-up
 
@@ -26,23 +28,19 @@ Before relying on this flow in a public deployment, confirm the intended MTProto
 
 The registered handler for `auth.dropTempAuthKeys` currently ignores `except_auth_keys` and returns `true`. This is a protocol-compatibility gap: callers are told the request succeeded, but the handler does not perform the requested cleanup. Review the temp-key lifecycle and implement the expected behavior with tests, or explicitly document the method as unsupported rather than silently acknowledging a no-op.
 
-### 4. Admin-panel login has no application-level rate limit
+### 4. Admin login limiter deployment boundary
 
-`POST /api/login` is registered directly to `handleAPILogin`. The handler performs password authentication (including bcrypt work and a dummy hash for unknown usernames), but the route and login handler contain no attempt counter, cooldown, or IP/account rate limiter. The main HTTP server also does not wrap the mux in a login-specific limiter.
+The implemented limiter is process-local. It returns HTTP 429 with Retry-After after 20 attempts per IP or 5 attempts per IP/username in a 15-minute window. It deliberately does not trust arbitrary `X-Forwarded-For` headers. Multi-replica deployments still need equivalent proxy-level rate limiting; ensure the reverse proxy is configured to preserve a trustworthy client address before relying on IP-based limits.
 
-This is a confirmed source-level gap, not proof that a particular deployment is currently exploitable: a reverse proxy or firewall may add throttling outside this process. Implemented on this branch: a bounded, concurrency-safe in-process limiter counts attempts by source IP and by IP+normalized username. It returns HTTP 429 with Retry-After after 20 attempts per IP or 5 attempts per IP/username in a 15-minute window. It uses RemoteAddr only and deliberately does not trust arbitrary X-Forwarded-For headers. This is process-local; multi-replica deployments still need proxy-level rate limiting. Avoid permanent account lockouts that let an attacker deny service to an operator.
+### 5. Admin cookie deployment configuration
 
-### 5. Admin session cookies do not set the Secure attribute
+Both cookies set Secure automatically for direct TLS requests, or when `TELESRV_ADMIN_UI_COOKIE_SECURE=true` is configured (required when TLS terminates at a reverse proxy). The default remains false for loopback plain-HTTP development; set it to true for any HTTPS deployment. The session cookie is HttpOnly and SameSite=Lax; the CSRF cookie is intentionally readable by the panel script.
 
-The session cookie and readable CSRF cookie are created without `Secure: true`; the clear-cookie helpers omit it too. If the panel is published on a hostname that is also reachable over plain HTTP, browsers may send the session cookie over that connection. A TLS reverse proxy alone does not automatically add the attribute.
-
-Implemented on this branch: both cookies now set Secure automatically for direct TLS requests, or when `TELESRV_ADMIN_UI_COOKIE_SECURE=true` is configured (required when TLS terminates at a reverse proxy). The default remains false for the loopback plain-HTTP development setup; set it to true for any HTTPS deployment. The session cookie is HttpOnly and SameSite=Lax; the CSRF cookie is intentionally readable by the panel script.
-
-### 6. Admin-panel accounts have no second factor or self-service recovery path in the login flow
+### 6. Admin-panel accounts have no second factor or self-service recovery path
 
 The observed panel login accepts a username plus password for named operators, or the configured break-glass password/token. The login handler does not require TOTP, passkey, or another second factor. The operator-management API can reset another operator's password, but no self-service recovery flow is present in these files.
 
-For a public or internet-reachable admin panel, require MFA for named operators and keep the break-glass credential offline/strongly protected. Document that loss of all operator credentials requires out-of-band recovery by the server owner; do not imply that end-user Telegram 2FA/passkeys automatically protect the separate admin console.
+MFA is not implemented on this branch. For a public or internet-reachable admin panel, require MFA for named operators and keep the break-glass credential offline/strongly protected. A safe implementation must cover enrollment, secret storage, challenge verification, recovery codes, revocation, session invalidation, and UI/API flows together; adding only a TOTP check to the login handler would create lockout and downgrade paths. Loss of all operator credentials requires out-of-band recovery by the server owner. End-user Telegram 2FA/passkeys do not automatically protect this separate admin console.
 
 ## Deployment checklist
 
@@ -54,4 +52,3 @@ For a public or internet-reachable admin panel, require MFA for named operators 
 - Use unique administrator credentials and a strong session key; keep all secrets and recovery material outside Git.
 - Test login, 2FA, passkey, session revocation, password recovery, and account deletion against a non-production database before opening registration.
 - Run the complete Go test suite and review all CI results before merging.
-
