@@ -55,3 +55,15 @@ func (r *Router) NotifyAccountFreezeChanged(_ context.Context, freeze domain.Acc
 	}
 	return nil
 }
+
+// NotifyUserChanged invalidates target-scoped user projections after an internal admin write.
+func (r *Router) NotifyUserChanged(_ context.Context, user domain.User) error {
+	if r == nil || user.ID == 0 {
+		return nil
+	}
+	if r.deps.UserProjectionFacts != nil {
+		r.deps.UserProjectionFacts.InvalidateCollectiblePhoneFact(user.ID)
+	}
+	r.invalidateRPCProjectionForUser(user.ID)
+	return nil
+}
