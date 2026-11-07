@@ -1,0 +1,60 @@
+name: Build Linux server binaries
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/build-server-binaries.yml"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/telesrv-admin/web/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            goarch: amd64
+          - arch: arm64
+            goarch: arm64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build server, admin panel, and supervisor
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist/bin
+          go build -trimpath -ldflags="-s -w" -o dist/bin/owpengram-server ./cmd/telesrv
+          go build -trimpath -ldflags="-s -w" -o dist/bin/telesrv-admin ./cmd/telesrv-admin
+          go build -trimpath -ldflags="-s -w" -o dist/bin/owpengram-ctl ./cmd/owpengram-ctl
+          chmod +x dist/bin/*
+          tar -C dist -czf "owpengram-linux-${{ matrix.arch }}.tar.gz" bin
+
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: owpengram-linux-${{ matrix.arch }}
+          path: owpengram-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
