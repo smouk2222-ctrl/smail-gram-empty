@@ -736,7 +736,7 @@ type Config struct {
 	// it skips wallet provisioning entirely and leaves @premiumbot's
 	// /deposit reporting itself unavailable -- an already-provisioned
 	// wallet and its funds are untouched, just dormant, so re-enabling
-	// later picks up exactly where it left off. True by default.
+	// later picks up exactly where it left off. False by default; operators must opt in.
 	DonationsEnabled bool
 	// UpdateCheckEnabled lets the admin panel ask GitHub once a day whether a
 	// newer OwpenGram server release exists and show a banner if so
@@ -1324,7 +1324,7 @@ func Load() (Config, error) {
 		RatingActivityCap:                 envInt64Or("TELESRV_RATING_ACTIVITY_CAP", domain.DefaultAccountRatingWeights().ActivityCap),
 		PremiumSweepInterval:              envDurationOr("TELESRV_PREMIUM_SWEEP_INTERVAL", time.Minute),
 		PremiumSweepBatch:                 envIntOr("TELESRV_PREMIUM_SWEEP_BATCH", 500),
-		DonationsEnabled:                  envBoolOr("TELESRV_DONATIONS_ENABLED", true),
+		DonationsEnabled:                  envBoolOr("TELESRV_DONATIONS_ENABLED", false),
 		UpdateCheckEnabled:                envBoolOr("TELESRV_UPDATE_CHECK", true),
 		DonationWalletKeyPath:             envOr("TELESRV_DONATION_WALLET_KEY_PATH", "data/donation_wallet.key"),
 		DonationWalletKey:                 strings.TrimSpace(envAllowEmptyOr("TELESRV_DONATION_WALLET_KEY", "")),
