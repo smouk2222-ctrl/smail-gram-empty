@@ -536,6 +536,7 @@ path. `TELESRV_PUBLIC_BASE_URL` must resolve to that proxy for moderation freeze
 | `TELESRV_STARS_MONTHLY_CLAIM_INTERVAL` | duration / `720h` | Cooldown between successful `/claim` uses, counted from the previous claim. |
 | `TELESRV_PREMIUM_SWEEP_INTERVAL` | duration / `1m` | Expired-premium cleanup/push interval. Read paths derive expiry independently. |
 | `TELESRV_PREMIUM_SWEEP_BATCH` | int / `500` | Maximum expired premium rows processed per sweep. |
+| `TELESRV_DONATIONS_ENABLED` | bool / `false` | Enables the custodial crypto wallet, `/deposit`, and chain watchers. Opt in only after reviewing custody/key backup and chain configuration; disabling leaves an existing wallet and funds dormant, not deleted. |
 
 ### Composite account rating and collectible usernames
 
