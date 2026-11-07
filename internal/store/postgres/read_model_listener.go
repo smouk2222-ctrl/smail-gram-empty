@@ -464,8 +464,18 @@ func (l *ReadModelChangeListener) handlePayload(payload string) {
 			}
 		}
 	case "user_collectible_phone":
-		if evt.PeerType == "user" && evt.PeerID != 0 && l.caches.UserProjectionFacts != nil {
-			l.caches.UserProjectionFacts.InvalidateCollectiblePhoneFact(evt.PeerID)
+		if evt.PeerType == "user" && evt.PeerID != 0 {
+			if l.caches.UserProjectionFacts != nil {
+				l.caches.UserProjectionFacts.InvalidateCollectiblePhoneFact(evt.PeerID)
+			}
+			// The base-user Redis snapshot may carry phone identity alongside
+			// the ordinary profile fields; evict it before the next projection.
+			if l.caches.BaseUsers != nil {
+				if err := l.caches.BaseUsers.Delete(context.Background(), []int64{evt.PeerID}); err != nil {
+					l.log.Warn("invalidate base user cache on collectible phone event",
+						zap.Int64("user_id", evt.PeerID), zap.Error(err))
+				}
+			}
 		}
 	case "user_visibility":
 		if evt.PeerType == "user" && evt.PeerID != 0 {
