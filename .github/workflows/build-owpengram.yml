@@ -1,0 +1,24 @@
+name: Build OwpenGram server
+on:
+  push:
+    branches:
+      - main
+      - work/initial-deploy-audit
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+      - name: Build server launcher
+        run: go build -v ./cmd/owpengram-ctl
+      - name: Build server binary
+        run: go build -v ./cmd/telesrv
