@@ -18,11 +18,11 @@ This is a source-level review, not a penetration test. Findings below describe b
 
 The default phone-code provider is `development`, with fixed code `12345` accepted for every phone number. This is suitable only for isolated local testing. A public deployment must configure a real delivery provider and a strong secret for its delivery endpoint before exposing login.
 
-### 2. Exported authorization token replay window
+### 2. Exported authorization token lifetime and replay protection
 
-`internal/rpc/auth.go` signs an export token containing only the user ID and a five-minute expiry. The import path verifies the HMAC and expiry, then binds the receiving connection. The token is not visibly consumed or tracked as one-time in this handler.
+`internal/rpc/auth.go` signs an export token containing the user ID and a five-minute expiry. The expiry is encoded at nanosecond precision and covered by HMAC-SHA256. Import consumes the token's SHA-256 digest in a mutex-protected, bounded in-memory replay cache (262,144 entries); only the first import succeeds, including when imports race concurrently. Expired entries are pruned during consumption, and a full cache fails closed rather than accepting an untracked token.
 
-Before relying on this flow in a public deployment, confirm the intended MTProto compatibility semantics and decide whether replay within the five-minute window is acceptable. If not, add a bounded, concurrency-safe one-time-use mechanism and tests for concurrent/repeated imports. Do not shorten the TTL or change semantics without client compatibility tests.
+This protection is process-local and is lost on restart. The signing secret is also generated per process. The current deployment model assumes all advertised DC IDs alias the same server process, so export and import reach that process; a restart requires the client to export again. Do not spread export/import across independent processes or replicas without replacing both the signing-key and replay-cache assumptions with a shared, atomic design. Keep the five-minute compatibility window unless client tests justify changing it.
 
 ### 3. auth.dropTempAuthKeys currently acknowledges without dropping keys
 
