@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
+	"sync"
 	"testing"
 	"time"
 )
@@ -50,5 +51,32 @@ func TestExportAuthTokenRejectsExpired(t *testing.T) {
 
 	if _, err := verifyExportAuthToken(token); err == nil {
 		t.Fatal("expected expired token to fail verification")
+	}
+}
+
+func TestExportAuthTokenConcurrentImportConsumesOnce(t *testing.T) {
+	token := signExportAuthToken(1780243202)
+
+	const attempts = 32
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		successes int
+	)
+	wg.Add(attempts)
+	for i := 0; i < attempts; i++ {
+		go func() {
+			defer wg.Done()
+			if _, err := verifyExportAuthToken(token); err == nil {
+				mu.Lock()
+				successes++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if successes != 1 {
+		t.Fatalf("successful imports = %d, want exactly one", successes)
 	}
 }
