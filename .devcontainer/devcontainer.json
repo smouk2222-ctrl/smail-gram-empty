@@ -11,7 +11,7 @@
   "forwardPorts": [2600, 2398, 2401],
   "portsAttributes": {
     "2600": { "label": "OwpenGram Admin Panel", "visibility": "private", "onAutoForward": "notify" },
-    "2398": { "label": "OwpenGram MTProto", "visibility": "private", "onAutoForward": "silent" },
+    "2398": { "label": "OwpenGram MTProto", "visibility": "public", "onAutoForward": "silent" },
     "2401": { "label": "OwpenGram Public Links", "visibility": "private", "onAutoForward": "silent" }
   }
 }
