@@ -19,10 +19,15 @@ import (
 // app/* 的 Service 实现它们；微服务化时 gRPC client 同样可实现，rpc 层无需改动。
 // 接口方法只用 domain 类型与基本类型，不依赖 app 具体包——这是 rpc↔业务的契约边界。
 
+// TempAuthKeyDropper is the optional auth service capability used by auth.dropTempAuthKeys.
+// Keeping it separate avoids widening the login service contract for unrelated test adapters.
+type TempAuthKeyDropper interface {
+	DropTempAuthKeys(ctx context.Context, permAuthKeyID int64, exceptAuthKeyIDs []int64) ([][8]byte, error)
+}
+
 // AuthService 抽象登录/注册业务。
 type AuthService interface {
 	BindTempAuthKey(ctx context.Context, sessionID int64, binding domain.TempAuthKeyBinding) (domain.TempAuthKeyBindingResult, error)
-	DropTempAuthKeys(ctx context.Context, permAuthKeyID int64, exceptAuthKeyIDs []int64) ([][8]byte, error)
 	ResolveAuthKey(ctx context.Context, authKeyID [8]byte) ([8]byte, bool, error)
 	UserID(ctx context.Context, authKeyID [8]byte) (int64, bool, error)
 	PendingPasswordUserID(ctx context.Context, authKeyID [8]byte) (int64, bool, error)

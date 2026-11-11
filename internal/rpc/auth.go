@@ -244,6 +244,10 @@ func (r *Router) onAuthDropTempAuthKeys(ctx context.Context, req *tg.AuthDropTem
 	if r.deps.Auth == nil || r.deps.Sessions == nil {
 		return false, internalErr()
 	}
+	dropper, supportsDrop := r.deps.Auth.(TempAuthKeyDropper)
+	if !supportsDrop {
+		return false, internalErr()
+	}
 	rawTerminator, supported := r.deps.Sessions.(RawSessionTerminator)
 	if !supported {
 		// Deleting durable keys without being able to fence live raw-key
@@ -272,7 +276,7 @@ func (r *Router) onAuthDropTempAuthKeys(ctx context.Context, req *tg.AuthDropTem
 		}
 	}
 
-	removed, err := r.deps.Auth.DropTempAuthKeys(ctx, int64(binary.LittleEndian.Uint64(permAuthKeyID[:])), exceptAuthKeys)
+	removed, err := dropper.DropTempAuthKeys(ctx, int64(binary.LittleEndian.Uint64(permAuthKeyID[:])), exceptAuthKeys)
 	if err != nil {
 		if errors.Is(err, auth.ErrAuthKeyPermEmpty) {
 			return false, authKeyUnregisteredErr()
