@@ -24,18 +24,19 @@ The default phone-code provider is `development`, with fixed code `12345` accept
 
 This protection is process-local and is lost on restart. The signing secret is also generated per process. The current deployment model assumes all advertised DC IDs alias the same server process, so export and import reach that process; a restart requires the client to export again. Do not spread export/import across independent processes or replicas without replacing both the signing-key and replay-cache assumptions with a shared, atomic design. Keep the five-minute compatibility window unless client tests justify changing it.
 
-### 3. auth.dropTempAuthKeys currently acknowledges without dropping keys
+### 3. auth.dropTempAuthKeys removes bound temporary keys
 
-The registered handler for `auth.dropTempAuthKeys` currently ignores `except_auth_keys` and returns `true`. This is a protocol-compatibility gap: callers are told the request succeeded, but the handler does not perform the requested cleanup.
+The handler now derives the canonical permanent auth-key ID from the current connection and removes only positive-expiry temporary keys durably bound to that permanent key, preserving every ID in `except_auth_keys`. A missing or temporary parent key is rejected; the operation never broadens into a global deletion.
 
-The storage model makes a naive implementation unsafe:
+The scope follows the current PFS data model:
 
-- `auth_keys.expires_at = 0` identifies permanent keys; a positive value identifies temporary keys; `-1` is a migration-only legacy/unknown value that the edge rejects. The protocol key row is the authoritative source of this classification.
-- `temp_auth_key_bindings` records only a temporary-to-permanent binding. A temporary key that has not yet been bound has no user/owner relationship in the current schema.
-- `AuthKeyStore.Delete` is a physical-key destruction primitive. For a permanent key it also deletes every temporary key bound to that permanent key and associated update state. It is not a suitable implementation of a request that merely drops selected temporary keys.
-- Physical deletion must be coordinated with active raw sessions and the activation/revalidation fence. Deleting rows based only on `expires_at` or a guessed current-user association could terminate another user's unbound handshake or race a connection becoming active.
+- `auth_keys.expires_at = 0` identifies permanent keys; a positive value identifies temporary keys; `-1` is a migration-only legacy/unknown value that the edge rejects.
+- `temp_auth_key_bindings` records the authoritative temporary-to-permanent relationship. Unbound temporary handshake keys have no parent identity and are deliberately left untouched for the expiry collector; they cannot safely be attributed to the caller.
+- The PostgreSQL store takes the permanent-identity advisory lock, locks candidate raw temporary-key rows in deterministic order before the permanent row, revalidates the bindings, removes their `update_states`, and deletes the key rows in one transaction. Binding and per-session Layer rows are removed by their foreign-key cascades. The memory implementation mirrors the same scope and validation.
+- After commit, the Router invalidates each deleted raw key from the temp-to-permanent cache and closes its active raw sessions. If the configured session manager cannot close raw-key sessions, the RPC fails before deleting anything.
+- If the request itself arrived over a bound temporary key, that current raw key is implicitly preserved even when the client omitted it from `except_auth_keys`; otherwise the server could terminate the connection before returning the Bool result.
 
-Therefore this handler is deliberately left unchanged pending a protocol-scope decision. Before implementing it, verify the exact MTProto semantics for the calling authorization, define how unbound temporary keys are associated with that caller (or prove the operation is intentionally global), add a store operation with an explicit except-list and transaction/locking guarantees, fence and close only the targeted raw sessions, and test concurrent activation, binding, deletion, and cross-user isolation. Until then, returning `true` is misleading and should be treated as a known compatibility defect—not as completed cleanup.
+Memory, PostgreSQL integration, and RPC tests cover the except list, unbound keys, other permanent identities, current-caller preservation, cache invalidation, and session closure. The operation is intentionally scoped to the calling permanent key rather than attempting to delete temporary keys belonging to unrelated identities.
 
 ### 4. Admin login limiter deployment boundary
 

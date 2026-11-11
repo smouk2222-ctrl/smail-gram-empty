@@ -22,4 +22,8 @@ type TempAuthKeyBindingStore interface {
 	// DeleteExpired 以 auth_keys 的握手协议 expiry 为唯一事实源，回收早于
 	// expiredBefore（unix 秒）的 temporary key，单次最多 limit 条并返回 key 数。
 	// 未绑定与已绑定的 PFS key 必须走同一路径；绑定经 ON DELETE CASCADE 清除。
-	DeleteExpired(ctx context.Context, expiredBefore int64, limit int) (int, error)}
+	DeleteExpired(ctx context.Context, expiredBefore int64, limit int) (int, error)
+	// DeleteByPermExcept atomically removes temporary keys bound to one permanent key,
+	// preserving the supplied raw auth_key IDs and returning deleted IDs for session/cache invalidation.
+	DeleteByPermExcept(ctx context.Context, permAuthKeyID int64, exceptAuthKeyIDs []int64) ([][8]byte, error)
+}

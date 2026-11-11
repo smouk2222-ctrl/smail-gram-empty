@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -109,6 +110,172 @@ func (s *TempAuthKeyBindingStore) DeleteExpired(ctx context.Context, expiredBefo
 		return 0, fmt.Errorf("delete expired temp auth keys: %w", err)
 	}
 	return int(n), nil
+}
+
+// DeleteByPermExcept removes the bound temporary keys for one permanent identity.
+// The identity advisory lock serializes this operation with bind/rebind and direct
+// auth-key deletion. All raw temp rows are locked in key order before the permanent
+// row, matching the repository-wide identity -> raw temp -> permanent lock order.
+func (s *TempAuthKeyBindingStore) DeleteByPermExcept(ctx context.Context, permAuthKeyID int64, exceptAuthKeyIDs []int64) ([][8]byte, error) {
+	if permAuthKeyID == 0 {
+		return nil, store.ErrAuthKeyBindingInvalid
+	}
+	exceptIDs := append([]int64{}, exceptAuthKeyIDs...)
+	var deletedIDs []int64
+	err := withAuthIdentityTx(ctx, s.db, "drop temporary auth keys", func(tx pgx.Tx) error {
+		if err := lockPermanentAuthIdentities(ctx, tx, []int64{permAuthKeyID}); err != nil {
+			return err
+		}
+
+		rows, err := tx.Query(ctx, `
+SELECT binding.temp_auth_key_id
+FROM public.temp_auth_key_bindings AS binding
+JOIN public.auth_keys AS temp_key
+  ON temp_key.auth_key_id = binding.temp_auth_key_id
+WHERE binding.perm_auth_key_id = $1
+  AND temp_key.expires_at > 0
+  AND NOT (binding.temp_auth_key_id = ANY($2::bigint[]))
+ORDER BY binding.temp_auth_key_id
+`, permAuthKeyID, exceptIDs)
+		if err != nil {
+			return fmt.Errorf("list bound temporary auth keys: %w", err)
+		}
+		candidateIDs := make([]int64, 0)
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan bound temporary auth key: %w", err)
+			}
+			candidateIDs = append(candidateIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("iterate bound temporary auth keys: %w", err)
+		}
+		rows.Close()
+
+		lockedIDs := make([]int64, 0, len(candidateIDs))
+		if len(candidateIDs) > 0 {
+			rows, err = tx.Query(ctx, `
+SELECT auth_key_id
+FROM public.auth_keys
+WHERE auth_key_id = ANY($1::bigint[])
+ORDER BY auth_key_id
+FOR UPDATE
+`, candidateIDs)
+			if err != nil {
+				return fmt.Errorf("lock bound temporary auth keys: %w", err)
+			}
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return fmt.Errorf("scan locked temporary auth key: %w", err)
+				}
+				lockedIDs = append(lockedIDs, id)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return fmt.Errorf("iterate locked temporary auth keys: %w", err)
+			}
+			rows.Close()
+		}
+
+		var permExpiry int
+		err = tx.QueryRow(ctx, `
+SELECT expires_at
+FROM public.auth_keys
+WHERE auth_key_id = $1
+FOR UPDATE
+`, permAuthKeyID).Scan(&permExpiry)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return store.ErrAuthKeyNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock permanent auth key: %w", err)
+		}
+		if permExpiry != 0 {
+			return store.ErrAuthKeyBindingInvalid
+		}
+		if len(lockedIDs) == 0 {
+			return nil
+		}
+
+		// Revalidate the relation after locking the raw rows. The identity gate
+		// prevents a concurrent bind from changing the parent; the recheck also
+		// tolerates the independent bounded expired-key collector winning a row
+		// lock before this transaction.
+		rows, err = tx.Query(ctx, `
+SELECT binding.temp_auth_key_id
+FROM public.temp_auth_key_bindings AS binding
+JOIN public.auth_keys AS temp_key
+  ON temp_key.auth_key_id = binding.temp_auth_key_id
+WHERE binding.perm_auth_key_id = $1
+  AND temp_key.expires_at > 0
+  AND binding.temp_auth_key_id = ANY($2::bigint[])
+  AND NOT (binding.temp_auth_key_id = ANY($3::bigint[]))
+ORDER BY binding.temp_auth_key_id
+`, permAuthKeyID, lockedIDs, exceptIDs)
+		if err != nil {
+			return fmt.Errorf("revalidate bound temporary auth keys: %w", err)
+		}
+		actualIDs := make([]int64, 0, len(lockedIDs))
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan revalidated temporary auth key: %w", err)
+			}
+			actualIDs = append(actualIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("iterate revalidated temporary auth keys: %w", err)
+		}
+		rows.Close()
+		if len(actualIDs) == 0 {
+			return nil
+		}
+
+		if _, err := tx.Exec(ctx, `
+DELETE FROM public.update_states
+WHERE auth_key_id = ANY($1::bigint[])
+`, actualIDs); err != nil {
+			return fmt.Errorf("delete temporary auth key update states: %w", err)
+		}
+		rows, err = tx.Query(ctx, `
+DELETE FROM public.auth_keys
+WHERE auth_key_id = ANY($1::bigint[])
+RETURNING auth_key_id
+`, actualIDs)
+		if err != nil {
+			return fmt.Errorf("delete temporary auth keys: %w", err)
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan deleted temporary auth key: %w", err)
+			}
+			deletedIDs = append(deletedIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("iterate deleted temporary auth keys: %w", err)
+		}
+		rows.Close()
+		sort.Slice(deletedIDs, func(i, j int) bool { return deletedIDs[i] < deletedIDs[j] })
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("drop temporary auth keys: %w", err)
+	}
+	removed := make([][8]byte, len(deletedIDs))
+	for i, id := range deletedIDs {
+		removed[i] = authKeyIDFromInt64(id)
+	}
+	return removed, nil
 }
 
 func (s *TempAuthKeyBindingStore) GetByTemp(ctx context.Context, tempAuthKeyID [8]byte) (domain.TempAuthKeyBinding, bool, error) {

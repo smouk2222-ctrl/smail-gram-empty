@@ -50,11 +50,7 @@ func (r *Router) registerAuth(d *tlprofile.Dispatcher) {
 		return r.onAuthImportAuthorization(ctx, req)
 	})
 	registerRPC[*tg.AuthDropTempAuthKeysRequest](d, tlprofile.SemanticMethodAuthDropTempAuthKeys, func(ctx context.Context, layerRequest *tg.AuthDropTempAuthKeysRequest) (any, error) {
-		exceptauthkeys := layerRequest.
-			ExceptAuthKeys
-		_ = exceptauthkeys
-
-		return true, nil
+		return r.onAuthDropTempAuthKeys(ctx, layerRequest)
 	})
 	registerRPC[*tg.AuthInitPasskeyLoginRequest](d, tlprofile.SemanticMethodAuthInitPasskeyLogin, func(ctx context.Context, layerRequest *tg.AuthInitPasskeyLoginRequest) (any, error) {
 		return r.onAuthInitPasskeyLogin(ctx, layerRequest)
@@ -235,6 +231,59 @@ func (r *Router) onAuthImportAuthorization(ctx context.Context, req *tg.AuthImpo
 	}
 	r.bindSessionUser(ctx, userID)
 	return &tg.AuthAuthorization{User: r.tgSelfUser(u)}, nil
+}
+
+func (r *Router) onAuthDropTempAuthKeys(ctx context.Context, req *tg.AuthDropTempAuthKeysRequest) (bool, error) {
+	if req == nil {
+		return false, internalErr()
+	}
+	permAuthKeyID, ok := AuthKeyIDFrom(ctx)
+	if !ok || permAuthKeyID == ([8]byte{}) {
+		return false, authKeyUnregisteredErr()
+	}
+	if r.deps.Auth == nil || r.deps.Sessions == nil {
+		return false, internalErr()
+	}
+	rawTerminator, supported := r.deps.Sessions.(RawSessionTerminator)
+	if !supported {
+		// Deleting durable keys without being able to fence live raw-key
+		// sessions would leave authenticated connections alive.
+		return false, internalErr()
+	}
+
+	exceptAuthKeys := append([]int64(nil), req.ExceptAuthKeys...)
+	rawAuthKeyID, hasRawAuthKeyID := RawAuthKeyIDFrom(ctx)
+	if !hasRawAuthKeyID || rawAuthKeyID == ([8]byte{}) {
+		rawAuthKeyID = permAuthKeyID
+	}
+	if rawAuthKeyID != permAuthKeyID {
+		// Never retire the raw key carrying this RPC before its Bool result can
+		// be returned. Clients may omit the current key from except_auth_keys.
+		currentRawID := int64(binary.LittleEndian.Uint64(rawAuthKeyID[:]))
+		keepCurrent := false
+		for _, id := range exceptAuthKeys {
+			if id == currentRawID {
+				keepCurrent = true
+				break
+			}
+		}
+		if !keepCurrent {
+			exceptAuthKeys = append(exceptAuthKeys, currentRawID)
+		}
+	}
+
+	removed, err := r.deps.Auth.DropTempAuthKeys(ctx, int64(binary.LittleEndian.Uint64(permAuthKeyID[:])), exceptAuthKeys)
+	if err != nil {
+		if errors.Is(err, auth.ErrAuthKeyPermEmpty) {
+			return false, authKeyUnregisteredErr()
+		}
+		return false, internalErr()
+	}
+	for _, rawID := range removed {
+		r.tempKeyResolveCache.Delete(rawID)
+		rawTerminator.CloseSessionsForRawAuthKeyExcept(rawID, 0)
+	}
+	return true, nil
 }
 
 func (r *Router) onAuthBindTempAuthKey(ctx context.Context, req *tg.AuthBindTempAuthKeyRequest) (bool, error) {

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/binary"
+	"sort"
 	"sync"
 	"time"
 
@@ -287,7 +288,54 @@ func (s *TempAuthKeyBindingStore) DeleteExpired(_ context.Context, expiredBefore
 	return deleted, nil
 }
 
-// AuthorizationStore 是 store.AuthorizationStore 的内存实现。
+// DeleteByPermExcept removes only temporary keys durably bound to permAuthKeyID.
+func (s *TempAuthKeyBindingStore) DeleteByPermExcept(_ context.Context, permAuthKeyID int64, exceptAuthKeyIDs []int64) ([][8]byte, error) {
+	if permAuthKeyID == 0 {
+		return nil, store.ErrAuthKeyBindingInvalid
+	}
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+
+	var permID [8]byte
+	binary.LittleEndian.PutUint64(permID[:], uint64(permAuthKeyID))
+	perm, found := s.state.keys[permID]
+	if !found {
+		return nil, store.ErrAuthKeyNotFound
+	}
+	if perm.ExpiresAt != 0 {
+		return nil, store.ErrAuthKeyBindingInvalid
+	}
+
+	except := make(map[int64]struct{}, len(exceptAuthKeyIDs))
+	for _, id := range exceptAuthKeyIDs {
+		except[id] = struct{}{}
+	}
+	candidates := make([][8]byte, 0)
+	for tempID, binding := range s.state.bindings {
+		if binding.PermAuthKeyID != permAuthKeyID {
+			continue
+		}
+		if _, keep := except[int64(binary.LittleEndian.Uint64(tempID[:]))]; keep {
+			continue
+		}
+		if key, ok := s.state.keys[tempID]; ok && key.ExpiresAt > 0 {
+			candidates = append(candidates, tempID)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return string(candidates[i][:]) < string(candidates[j][:])
+	})
+
+	deleted := make([][8]byte, 0, len(candidates))
+	for _, tempID := range candidates {
+		removed := s.state.deleteProtocolAuthKeyLocked(tempID)
+		s.state.deleteAuthorizationMirrorsLocked(removed)
+		deleted = append(deleted, removed...)
+	}
+	return deleted, nil
+}
+
+// AuthorizationStore 是 store.AuthorizationStore 的内存实现.
 type AuthorizationStore struct {
 	linkMu   sync.RWMutex
 	authKeys *authKeyState

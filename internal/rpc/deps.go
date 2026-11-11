@@ -22,6 +22,7 @@ import (
 // AuthService 抽象登录/注册业务。
 type AuthService interface {
 	BindTempAuthKey(ctx context.Context, sessionID int64, binding domain.TempAuthKeyBinding) (domain.TempAuthKeyBindingResult, error)
+	DropTempAuthKeys(ctx context.Context, permAuthKeyID int64, exceptAuthKeyIDs []int64) ([][8]byte, error)
 	ResolveAuthKey(ctx context.Context, authKeyID [8]byte) ([8]byte, bool, error)
 	UserID(ctx context.Context, authKeyID [8]byte) (int64, bool, error)
 	PendingPasswordUserID(ctx context.Context, authKeyID [8]byte) (int64, bool, error)
