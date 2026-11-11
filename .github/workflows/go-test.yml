@@ -45,3 +45,36 @@ jobs:
           go build ./cmd/owpengram-ctl
       - name: Run full test suite
         run: go test ./...
+
+  postgres-temp-auth-key:
+    name: PostgreSQL temporary auth-key integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: telesrv_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d telesrv_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TELESRV_TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/telesrv_test?sslmode=disable
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test PostgreSQL temporary auth-key lifecycle
+        run: go test ./internal/store/postgres -run 'TempAuthKey|AuthorizationStoreRejectsTemporaryProtocolKey' -count=1
