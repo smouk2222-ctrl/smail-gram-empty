@@ -421,6 +421,25 @@ func TestLoadS3BlobStorageConfig(t *testing.T) {
 	}
 }
 
+func TestLoadS3BlobStorageDefaultsToTLS(t *testing.T) {
+	disableDefaultConfigFile(t)
+	t.Setenv("TELESRV_BLOB_BACKEND", "s3")
+	t.Setenv("TELESRV_BLOB_STAGING_DIR", "data/blob-staging")
+	t.Setenv("TELESRV_S3_ENDPOINT", "s3.example.test")
+	t.Setenv("TELESRV_S3_BUCKET", "telesrv-media")
+	t.Setenv("TELESRV_S3_ACCESS_KEY_ID", "access")
+	t.Setenv("TELESRV_S3_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("TELESRV_S3_USE_SSL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.S3UseSSL {
+		t.Fatal("S3UseSSL = false, want TLS enabled by default")
+	}
+}
+
 func TestLoadRejectsInvalidBlobStorageConfig(t *testing.T) {
 	tests := []struct {
 		name     string
