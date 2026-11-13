@@ -1,0 +1,80 @@
+name: Go tests
+
+on:
+  # The PR event already tests every topic-branch push. Restrict push runs
+  # to main so each commit on an open PR does not enqueue the same suite twice.
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+# Keep only the newest validation for a PR/ref. Older queued test runs are
+# redundant and can delay feedback after a branch receives several commits.
+concurrency:
+  group: go-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          # Test the immutable PR head SHA. GitHub can retire an old synthetic
+          # merge ref while queued runs wait behind other jobs, making checkout
+          # fail before tests even start.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Keep the security-sensitive admin console tests visible as their own
+      # result even if unrelated packages in the full repository suite fail.
+      - name: Test admin console
+        run: go test ./cmd/telesrv-admin
+      - name: Build server executables
+        run: |
+          go build ./cmd/telesrv
+          go build ./cmd/telesrv-admin
+          go build ./cmd/owpengram-ctl
+      - name: Run full test suite
+        run: go test ./...
+
+  postgres-temp-auth-key:
+    name: PostgreSQL temporary auth-key integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: telesrv_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d telesrv_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TELESRV_TEST_POSTGRES_DSN: postgres://postgres:postgres@127.0.0.1:5432/telesrv_test?sslmode=disable
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test PostgreSQL temporary auth-key lifecycle
+        run: go test ./internal/store/postgres -run 'TempAuthKey|AuthorizationStoreRejectsTemporaryProtocolKey' -count=1

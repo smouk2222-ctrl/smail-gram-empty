@@ -14,6 +14,10 @@ import (
 // meaningful to anyone working through a stolen dump of the table.
 const bcryptCost = 12
 
+// Admin passwords are single-factor credentials until MFA is implemented.
+// Require at least 15 Unicode code points, while respecting bcrypt's 72-byte limit.
+const adminPasswordMinRunes = 15
+
 // dummyBcryptHash is compared against when no account matched, so a login
 // attempt costs the same whether or not the username exists. Without it the
 // response time alone answers "is there an operator called X" -- the exact
@@ -109,17 +113,17 @@ func hashAdminPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// validateAdminPassword deliberately imposes no length floor and no
-// composition rule: the operator picks the password.
-//
-// The two checks that remain are not policy. A blank password is not a weak
-// password, it is no password -- anyone who learns the username is in. And
-// bcrypt silently ignores everything past 72 bytes, so a longer one is refused
-// rather than quietly truncated to something the operator did not choose and
-// cannot reproduce.
+// validateAdminPassword requires a passphrase-length credential for named
+// panel operators. The admin console has no second factor yet, so accepting
+// one-character passwords would make the login throttle the only meaningful
+// barrier against guessing. Count Unicode code points for the minimum, but
+// enforce bcrypt's 72-byte maximum to avoid silent truncation.
 func validateAdminPassword(password string) error {
 	if strings.TrimSpace(password) == "" {
 		return errPasswordBlank
+	}
+	if len([]rune(password)) < adminPasswordMinRunes {
+		return errPasswordTooShort
 	}
 	if len([]byte(password)) > 72 {
 		return errPasswordTooLong
@@ -129,6 +133,7 @@ func validateAdminPassword(password string) error {
 
 var (
 	errPasswordTooLong = errors.New("password must be at most 72 bytes")
+	errPasswordTooShort = errors.New("password must be at least 15 characters")
 	errPasswordBlank   = errors.New("password must not be blank")
 	errUsernameInvalid = errors.New("username must be 3-64 characters: letters, digits, dot, dash or underscore")
 )

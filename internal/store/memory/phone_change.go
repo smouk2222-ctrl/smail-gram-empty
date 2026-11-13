@@ -39,6 +39,7 @@ func (s *PhoneChangeStore) ChangePhone(_ context.Context, req domain.PhoneChange
 		}
 	}
 	u.Phone = req.Phone
+	u.SignupEmail = req.SignupEmail
 	s.users.byID[req.UserID] = u
 	s.users.mu.Unlock()
 	return domain.PhoneChangeResult{User: u, Changed: true}, nil

@@ -104,7 +104,7 @@ func newCSRFToken() (string, error) {
 }
 
 // setCSRFCookie publishes the token to the browser.
-func setCSRFCookie(w http.ResponseWriter, token string, ttl time.Duration) {
+func setCSRFCookie(w http.ResponseWriter, token string, ttl time.Duration, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:   csrfCookieName,
 		Value:  token,
@@ -112,17 +112,19 @@ func setCSRFCookie(w http.ResponseWriter, token string, ttl time.Duration) {
 		MaxAge: int(ttl.Seconds()),
 		// Readable by the panel's script on purpose; see csrfCookieName.
 		HttpOnly: false,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter) {
+func clearSessionCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.SetCookie(w, &http.Cookie{
@@ -131,6 +133,7 @@ func clearSessionCookie(w http.ResponseWriter) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: false,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }

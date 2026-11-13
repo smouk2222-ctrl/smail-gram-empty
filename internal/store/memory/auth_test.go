@@ -459,3 +459,78 @@ func assertMemoryAuthKeyExpiry(
 		t.Fatalf("auth key expires_at = %d, want handshake expiry %d", got.ExpiresAt, want)
 	}
 }
+
+
+func TestTempAuthKeyBindingStoreDeleteByPermExcept(t *testing.T) {
+	ctx := context.Background()
+	keys := NewAuthKeyStore()
+	bindings := NewTempAuthKeyBindingStore(keys)
+	const expiry = 1_800_000_000
+
+	permID := memoryAuthKeyID(701)
+	otherPermID := memoryAuthKeyID(702)
+	keepID := memoryAuthKeyID(703)
+	dropID := memoryAuthKeyID(704)
+	otherTempID := memoryAuthKeyID(705)
+	unboundID := memoryAuthKeyID(706)
+	missingID := memoryAuthKeyID(707)
+
+	for _, key := range []store.AuthKeyData{
+		{ID: permID},
+		{ID: otherPermID},
+		{ID: keepID, ExpiresAt: expiry},
+		{ID: dropID, ExpiresAt: expiry},
+		{ID: otherTempID, ExpiresAt: expiry},
+		{ID: unboundID, ExpiresAt: expiry},
+	} {
+		if err := keys.Save(ctx, key); err != nil {
+			t.Fatalf("save auth key %x: %v", key.ID, err)
+		}
+	}
+	for _, binding := range []domain.TempAuthKeyBinding{
+		{TempAuthKeyID: keepID, PermAuthKeyID: int64(binary.LittleEndian.Uint64(permID[:])), ExpiresAt: expiry},
+		{TempAuthKeyID: dropID, PermAuthKeyID: int64(binary.LittleEndian.Uint64(permID[:])), ExpiresAt: expiry},
+		{TempAuthKeyID: otherTempID, PermAuthKeyID: int64(binary.LittleEndian.Uint64(otherPermID[:])), ExpiresAt: expiry},
+	} {
+		if err := bindings.Save(ctx, binding); err != nil {
+			t.Fatalf("save binding %x: %v", binding.TempAuthKeyID, err)
+		}
+	}
+
+	removed, err := bindings.DeleteByPermExcept(ctx,
+		int64(binary.LittleEndian.Uint64(permID[:])),
+		[]int64{int64(binary.LittleEndian.Uint64(keepID[:]))},
+	)
+	if err != nil {
+		t.Fatalf("DeleteByPermExcept: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != dropID {
+		t.Fatalf("removed keys = %x, want only %x", removed, dropID)
+	}
+	for _, tc := range []struct {
+		id    [8]byte
+		found bool
+	}{
+		{id: permID, found: true},
+		{id: keepID, found: true},
+		{id: dropID, found: false},
+		{id: otherTempID, found: true},
+		{id: unboundID, found: true},
+	} {
+		if _, found, err := keys.Get(ctx, tc.id); err != nil || found != tc.found {
+			t.Fatalf("key %x found=%v err=%v, want found=%v", tc.id, found, err, tc.found)
+		}
+	}
+	if _, found, err := bindings.GetByTemp(ctx, dropID); err != nil || found {
+		t.Fatalf("dropped binding found=%v err=%v, want absent", found, err)
+	}
+	if _, found, err := bindings.GetByTemp(ctx, keepID); err != nil || !found {
+		t.Fatalf("preserved binding found=%v err=%v, want present", found, err)
+	}
+	if _, err := bindings.DeleteByPermExcept(ctx, int64(binary.LittleEndian.Uint64(keepID[:])), nil); !errors.Is(err, store.ErrAuthKeyBindingInvalid) {
+		t.Fatalf("temporary parent error = %v, want %v", err, store.ErrAuthKeyBindingInvalid)
+	}
+	if _, err := bindings.DeleteByPermExcept(ctx, int64(binary.LittleEndian.Uint64(missingID[:])), nil); !errors.Is(err, store.ErrAuthKeyNotFound) {
+		t.Fatalf("missing parent error = %v, want %v", err, store.ErrAuthKeyNotFound)
+	}
+}

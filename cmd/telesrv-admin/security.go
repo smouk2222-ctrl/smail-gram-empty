@@ -204,7 +204,7 @@ func (s *server) requireAuthAPI(next http.Handler) http.Handler {
 		}
 		claims, ok := verifySession(s.cfg.SessionKey, cookie.Value, time.Now())
 		if !ok {
-			clearSessionCookie(w)
+			clearSessionCookie(w, s.cfg.CookieSecure || r.TLS != nil)
 			writeAPIError(w, http.StatusUnauthorized, "not authenticated")
 			return
 		}
@@ -229,7 +229,7 @@ func (s *server) requireAuthAPI(next http.Handler) http.Handler {
 			// here turned one slow request into a permanent 401 storm
 			// until the operator logged back in by hand.
 			if revoked {
-				clearSessionCookie(w)
+				clearSessionCookie(w, s.cfg.CookieSecure || r.TLS != nil)
 			}
 			writeAPIError(w, http.StatusUnauthorized, "session is no longer valid")
 			return

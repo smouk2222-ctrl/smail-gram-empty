@@ -421,6 +421,25 @@ func TestLoadS3BlobStorageConfig(t *testing.T) {
 	}
 }
 
+func TestLoadS3BlobStorageDefaultsToTLS(t *testing.T) {
+	disableDefaultConfigFile(t)
+	t.Setenv("TELESRV_BLOB_BACKEND", "s3")
+	t.Setenv("TELESRV_BLOB_STAGING_DIR", "data/blob-staging")
+	t.Setenv("TELESRV_S3_ENDPOINT", "s3.example.test")
+	t.Setenv("TELESRV_S3_BUCKET", "telesrv-media")
+	t.Setenv("TELESRV_S3_ACCESS_KEY_ID", "access")
+	t.Setenv("TELESRV_S3_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("TELESRV_S3_USE_SSL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.S3UseSSL {
+		t.Fatal("S3UseSSL = false, want TLS enabled by default")
+	}
+}
+
 func TestLoadRejectsInvalidBlobStorageConfig(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1725,4 +1744,28 @@ func writeConfigFile(t *testing.T, path, body string) {
 func disableDefaultConfigFile(t *testing.T) {
 	t.Helper()
 	t.Setenv("TELESRV_CONFIG", "")
+}
+
+func TestLoadDonationsDisabledByDefaultAndExplicitOptIn(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		env  string
+		want bool
+	}{
+		{name: "default disabled", env: "", want: false},
+		{name: "explicit opt in", env: "true", want: true},
+		{name: "explicit opt out", env: "false", want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			disableDefaultConfigFile(t)
+			t.Setenv("TELESRV_DONATIONS_ENABLED", test.env)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.DonationsEnabled != test.want {
+				t.Fatalf("DonationsEnabled = %v, want %v", cfg.DonationsEnabled, test.want)
+			}
+		})
+	}
 }

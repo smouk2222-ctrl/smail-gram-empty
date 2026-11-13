@@ -170,6 +170,7 @@ func (r *Router) invalidateDeletedUserProjectionFacts(userID int64) {
 		return
 	}
 	r.deps.UserProjectionFacts.InvalidateAccountFreezeFact(userID)
+	r.deps.UserProjectionFacts.InvalidateCollectiblePhoneFact(userID)
 }
 
 func accountDeletionErr(err error) error {

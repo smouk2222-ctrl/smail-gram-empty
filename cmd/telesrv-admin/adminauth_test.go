@@ -19,8 +19,9 @@ func TestValidateAdminPassword(t *testing.T) {
 		want     error
 	}{
 		{"ok", "correct horse battery", nil},
-		// No length floor: the operator picks the password, however short.
-		{"a single character", "x", nil},
+		{"too short", strings.Repeat("a", adminPasswordMinRunes-1), errPasswordTooShort},
+		{"minimum length", strings.Repeat("a", adminPasswordMinRunes), nil},
+		{"unicode minimum length", strings.Repeat("я", adminPasswordMinRunes), nil},
 		{"blank", "   ", errPasswordBlank},
 		{"empty", "", errPasswordBlank},
 		// bcrypt truncates silently past 72 bytes, so anything longer must be
@@ -84,9 +85,12 @@ func TestHashAdminPasswordRoundTrips(t *testing.T) {
 }
 
 func TestHashAdminPasswordRejectsInvalid(t *testing.T) {
-	// A short password is fine; an absent one is not.
-	if _, err := hashAdminPassword("x"); err != nil {
-		t.Fatalf("a one-character password was refused: %v", err)
+	// Passwords below the single-factor minimum must be rejected.
+	if _, err := hashAdminPassword("x"); !errors.Is(err, errPasswordTooShort) {
+		t.Fatalf("err = %v, want errPasswordTooShort", err)
+	}
+	if _, err := hashAdminPassword(strings.Repeat("a", adminPasswordMinRunes)); err != nil {
+		t.Fatalf("minimum-length password was refused: %v", err)
 	}
 	if _, err := hashAdminPassword("   "); !errors.Is(err, errPasswordBlank) {
 		t.Fatalf("err = %v, want errPasswordBlank", err)

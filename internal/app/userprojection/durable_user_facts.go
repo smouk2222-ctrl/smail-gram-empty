@@ -119,6 +119,14 @@ func (f *DurableUserProjectionFacts) InvalidateAccountFreezeFact(userID int64) {
 	}
 }
 
+// InvalidateCollectiblePhoneFact is intentionally a no-op: collectible phone
+// values are not retained in this durable overlay cache. The listener updates
+// the corresponding read-model version token before dispatching this hook.
+func (f *DurableUserProjectionFacts) InvalidateCollectiblePhoneFact(userID int64) {
+	_ = f
+	_ = userID
+}
+
 func (f *DurableUserProjectionFacts) FlushUserProjectionFactReadModel() {
 	if f != nil {
 		f.freezeCache.Flush()

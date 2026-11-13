@@ -170,10 +170,11 @@ type Config struct {
 	TelegramLoginSweepInterval     time.Duration
 	TelegramLoginSweepBatch        int
 	// Admin UI 独立进程配置项保留在统一配置中，cmd/telesrv-admin 也按同名 env 读取。
-	AdminUIAddr     string
-	AdminUIPassword string
-	AdminUIToken    string
-	AdminSessionKey string
+	AdminUIAddr         string
+	AdminUIPassword     string
+	AdminUIToken        string
+	AdminSessionKey     string
+	AdminUICookieSecure bool
 	// AdminUIPermissions is the permission set granted to a panel session that
 	// authenticated with TELESRV_ADMIN_UI_PASSWORD / _TOKEN. The single entry "*"
 	// means "every permission" and is the shipped default, so enabling RBAC never
@@ -736,7 +737,7 @@ type Config struct {
 	// it skips wallet provisioning entirely and leaves @premiumbot's
 	// /deposit reporting itself unavailable -- an already-provisioned
 	// wallet and its funds are untouched, just dormant, so re-enabling
-	// later picks up exactly where it left off. True by default.
+	// later picks up exactly where it left off. False by default; operators must opt in.
 	DonationsEnabled bool
 	// UpdateCheckEnabled lets the admin panel ask GitHub once a day whether a
 	// newer OwpenGram server release exists and show a banner if so
@@ -1108,6 +1109,7 @@ func Load() (Config, error) {
 		AdminUIPermissions:             envListOr("TELESRV_ADMIN_UI_PERMISSIONS", []string{adminPermissionAll}),
 		AdminScopedTokens:              adminScopedTokens,
 		AdminUIAddr:                    envOr("TELESRV_ADMIN_UI_ADDR", "127.0.0.1:2600"),
+		AdminUICookieSecure:            envBoolOr("TELESRV_ADMIN_UI_COOKIE_SECURE", false),
 		AdminUIPassword:                envOr("TELESRV_ADMIN_UI_PASSWORD", ""),
 		AdminUIToken:                   envOr("TELESRV_ADMIN_UI_TOKEN", ""),
 		AdminSessionKey:                envOr("TELESRV_ADMIN_SESSION_KEY", ""),
@@ -1158,12 +1160,12 @@ func Load() (Config, error) {
 		BlobBackendKind:                   strings.ToLower(strings.TrimSpace(envOr("TELESRV_BLOB_BACKEND", ""))),
 		BlobDir:                           envOr("TELESRV_BLOB_DIR", "data/blobs"),
 		BlobStagingDir:                    envOr("TELESRV_BLOB_STAGING_DIR", "data/blob-staging"),
-		S3Endpoint:                        envOr("TELESRV_S3_ENDPOINT", "127.0.0.1:9000"), // 同理避开 localhost→IPv6 回退延迟
+		S3Endpoint:                        envOr("TELESRV_S3_ENDPOINT", ""),
 		S3Region:                          envOr("TELESRV_S3_REGION", "us-east-1"),
-		S3Bucket:                          envOr("TELESRV_S3_BUCKET", "owpengram-media"),
-		S3AccessKeyID:                     envOr("TELESRV_S3_ACCESS_KEY_ID", "owpengram"),
-		S3SecretAccessKey:                 envOr("TELESRV_S3_SECRET_ACCESS_KEY", "owpengram123"),
-		S3UseSSL:                          envBoolOr("TELESRV_S3_USE_SSL", false),
+		S3Bucket:                          envOr("TELESRV_S3_BUCKET", ""),
+		S3AccessKeyID:                     envOr("TELESRV_S3_ACCESS_KEY_ID", ""),
+		S3SecretAccessKey:                 envOr("TELESRV_S3_SECRET_ACCESS_KEY", ""),
+		S3UseSSL:                          envBoolOr("TELESRV_S3_USE_SSL", true),
 		S3PathStyle:                       envBoolOr("TELESRV_S3_PATH_STYLE", true),
 		S3CreateBucket:                    envBoolOr("TELESRV_S3_CREATE_BUCKET", false),
 		StorageLowSpaceGuardEnable:        envBoolOr("TELESRV_STORAGE_LOW_SPACE_GUARD_ENABLE", true),
@@ -1324,7 +1326,7 @@ func Load() (Config, error) {
 		RatingActivityCap:                 envInt64Or("TELESRV_RATING_ACTIVITY_CAP", domain.DefaultAccountRatingWeights().ActivityCap),
 		PremiumSweepInterval:              envDurationOr("TELESRV_PREMIUM_SWEEP_INTERVAL", time.Minute),
 		PremiumSweepBatch:                 envIntOr("TELESRV_PREMIUM_SWEEP_BATCH", 500),
-		DonationsEnabled:                  envBoolOr("TELESRV_DONATIONS_ENABLED", true),
+		DonationsEnabled:                  envBoolOr("TELESRV_DONATIONS_ENABLED", false),
 		UpdateCheckEnabled:                envBoolOr("TELESRV_UPDATE_CHECK", true),
 		DonationWalletKeyPath:             envOr("TELESRV_DONATION_WALLET_KEY_PATH", "data/donation_wallet.key"),
 		DonationWalletKey:                 strings.TrimSpace(envAllowEmptyOr("TELESRV_DONATION_WALLET_KEY", "")),
