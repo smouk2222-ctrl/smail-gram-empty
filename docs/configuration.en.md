@@ -393,6 +393,15 @@ no separate service, no address, and no password to configure.
 | `TELESRV_POSTGRES_MIN_CONNS` | int / `16` | pgxpool pre-warmed minimum connections. |
 | `TELESRV_LANGPACK_SEED_DIR` | path / `data/langpack` | TDesktop `.strings` language-pack seed directory. |
 | `TELESRV_BLOB_DIR` | path / `data/blobs` | Local development blob-backend root for media bytes. |
+| `TELESRV_BLOB_BACKEND` | enum / inferred | `localfs` or `s3`; inferred as `s3` when an S3 endpoint is configured, otherwise `localfs`. |
+| `TELESRV_BLOB_STAGING_DIR` | path / `data/blob-staging` | Required temporary staging directory when the S3 backend is selected. |
+| `TELESRV_S3_ENDPOINT` | host[:port] / empty | S3-compatible endpoint without a URL scheme; required with the S3 backend. |
+| `TELESRV_S3_BUCKET` | string / empty | Required bucket name when the S3 backend is selected. |
+| `TELESRV_S3_ACCESS_KEY_ID` / `TELESRV_S3_SECRET_ACCESS_KEY` | secrets / empty | Both are required when the S3 backend is selected. Never commit real credentials. |
+| `TELESRV_S3_USE_SSL` | bool / `true` | HTTPS is enabled by default so S3 credentials and object traffic are encrypted in transit. Set `false` only for a trusted local MinIO/test endpoint without TLS. |
+| `TELESRV_S3_REGION` | string / `us-east-1` | S3 signing region. |
+| `TELESRV_S3_PATH_STYLE` | bool / `true` | Use path-style bucket addressing; usually required by self-hosted MinIO. |
+| `TELESRV_S3_CREATE_BUCKET` | bool / `false` | Create the configured bucket at startup if it does not exist. |
 | `TELESRV_STICKER_SEED_DIR` | path / `data/sticker-seed` | Sticker/reaction seed packages imported into documents, sticker sets, and blobs. |
 | `TELESRV_STICKER_SEED_MAX_SETS` | int / `300` | Maximum regular sticker sets imported at startup; `<=0` means unlimited. |
 | `TELESRV_PREMIUM_PROMO_SEED_DIR` | path / `data/premium-promo` | Exported `help.getPremiumPromo` manifest, MP4 videos, and JPEG thumbnails. A missing directory keeps the no-video fallback; an existing invalid/incomplete directory fails startup. |
