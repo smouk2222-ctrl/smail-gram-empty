@@ -1165,7 +1165,7 @@ func Load() (Config, error) {
 		S3Bucket:                          envOr("TELESRV_S3_BUCKET", ""),
 		S3AccessKeyID:                     envOr("TELESRV_S3_ACCESS_KEY_ID", ""),
 		S3SecretAccessKey:                 envOr("TELESRV_S3_SECRET_ACCESS_KEY", ""),
-		S3UseSSL:                          envBoolOr("TELESRV_S3_USE_SSL", false),
+		S3UseSSL:                          envBoolOr("TELESRV_S3_USE_SSL", true),
 		S3PathStyle:                       envBoolOr("TELESRV_S3_PATH_STYLE", true),
 		S3CreateBucket:                    envBoolOr("TELESRV_S3_CREATE_BUCKET", false),
 		StorageLowSpaceGuardEnable:        envBoolOr("TELESRV_STORAGE_LOW_SPACE_GUARD_ENABLE", true),
