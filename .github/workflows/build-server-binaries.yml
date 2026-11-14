@@ -7,6 +7,7 @@ on:
       - "smail-gram/security-defaults"
     paths:
       - ".github/workflows/build-server-binaries.yml"
+      - ".devcontainer/devcontainer.json"
       - "**/*.go"
       - "go.mod"
       - "go.sum"
@@ -14,6 +15,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/build-server-binaries.yml"
+      - ".devcontainer/devcontainer.json"
       - "**/*.go"
       - "go.mod"
       - "go.sum"
@@ -40,6 +42,22 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Verify Codespaces ports are private by default
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          config = json.loads(Path(".devcontainer/devcontainer.json").read_text(encoding="utf-8"))
+          ports = config.get("portsAttributes", {})
+          for port in ("2600", "2398", "2401"):
+              attributes = ports.get(port)
+              if not isinstance(attributes, dict) or attributes.get("visibility") != "private":
+                  raise SystemExit(f"Codespaces port {port} must remain private by default")
+          if ports["2398"].get("onAutoForward") != "notify":
+              raise SystemExit("Codespaces MTProto port 2398 must notify when auto-forwarded")
+          PY
 
       - name: Set up Go
         uses: actions/setup-go@v5
