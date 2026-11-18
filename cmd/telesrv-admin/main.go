@@ -119,7 +119,7 @@ type uiConfig struct {
 	// the "Third-party marks" nav entry and its routes.
 	HideThirdPartyVerification bool
 	// DonationsEnabled mirrors config.DonationsEnabled (TELESRV_DONATIONS_ENABLED,
-	// default true): while false, every donations.* route refuses with 404
+	// default false): while false, every donations.* route refuses with 404
 	// regardless of session permissions, and the session/login response tells
 	// the frontend to hide the "Donations" nav entry and its route. The
 	// server-side feature itself is already a no-op when disabled (see
