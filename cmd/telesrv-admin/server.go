@@ -301,10 +301,10 @@ func (s *server) handleApp(w http.ResponseWriter, r *http.Request) {
 }
 
 type loginRequest struct {
-	// Username selects a named account in admin_console_users. Left empty, the
-	// credential is checked against TELESRV_ADMIN_UI_PASSWORD / _TOKEN instead,
-	// which keeps the pre-accounts login working and doubles as the way back in
-	// if the database is unreachable or every named account is locked out.
+	// Username selects a named account in admin_console_users. The built-in
+	// break-glass credential is selected explicitly with username "owpengram",
+	// and remains available if the database is unreachable or named accounts
+	// are locked out.
 	Username string `json:"username"`
 	Secret   string `json:"secret"`
 }
