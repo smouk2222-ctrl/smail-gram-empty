@@ -1232,6 +1232,7 @@ func TestLoadAIProviders(t *testing.T) {
 
 func TestLoadTranslationConfig(t *testing.T) {
 	t.Setenv("TELESRV_CONFIG", "")
+	setLocalDevelopmentOTP(t)
 	t.Setenv("TELESRV_TRANSLATION_ENABLED", "true")
 	t.Setenv("TELESRV_TRANSLATION_PROVIDERS", "openai,gemini")
 	t.Setenv("TELESRV_TRANSLATION_TIMEOUT", "9s")
@@ -1251,6 +1252,7 @@ func TestLoadTranslationConfig(t *testing.T) {
 
 func TestLoadStorySparseProjectionCacheConfig(t *testing.T) {
 	t.Setenv("TELESRV_CONFIG", "")
+	setLocalDevelopmentOTP(t)
 	t.Setenv("TELESRV_STORY_ACTIVE_PEER_CACHE_MAX", "1234")
 	t.Setenv("TELESRV_STORY_HIDDEN_LIST_CACHE_MAX", "2345")
 	t.Setenv("TELESRV_STORY_HIDDEN_LIST_CACHE_BYTES_MAX", "3456")
@@ -1279,6 +1281,7 @@ TELESRV_PUBLIC_APP_NAME=Example Chat
 TELESRV_PUBLIC_LINK_WEB_ADDR=127.0.0.1:2401
 `)
 	t.Setenv("TELESRV_CONFIG", path)
+	setLocalDevelopmentOTP(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -1463,6 +1466,7 @@ TELESRV_ADMIN_API_ADDR=127.0.0.1:2599
 TELESRV_PUBLIC_LINK_WEB_ADDR=127.0.0.1:2401
 `)
 	t.Setenv("TELESRV_CONFIG", path)
+	setLocalDevelopmentOTP(t)
 	t.Setenv("TELESRV_DEBUG_ADDR", "")
 	t.Setenv("TELESRV_BOT_API_ADDR", "")
 	t.Setenv("TELESRV_ADMIN_API_ADDR", "")
@@ -1481,6 +1485,7 @@ func TestLoadEnvironmentOverridesConfigFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "telesrv.env")
 	writeConfigFile(t, path, `TELESRV_MAPBOX_TOKEN=file-token`)
 	t.Setenv("TELESRV_CONFIG", path)
+	setLocalDevelopmentOTP(t)
 	t.Setenv("TELESRV_MAPBOX_TOKEN", "env-token")
 
 	cfg, err := Load()
@@ -1504,6 +1509,7 @@ func TestLoadRejectsNonTelesrvConfigKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "telesrv.env")
 	writeConfigFile(t, path, `MAPBOX_TOKEN=file-token`)
 	t.Setenv("TELESRV_CONFIG", path)
+	setLocalDevelopmentOTP(t)
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load succeeded with unsupported config key, want error")
@@ -1790,6 +1796,11 @@ func writeConfigFile(t *testing.T, path, body string) {
 func disableDefaultConfigFile(t *testing.T) {
 	t.Helper()
 	t.Setenv("TELESRV_CONFIG", "")
+	setLocalDevelopmentOTP(t)
+}
+
+func setLocalDevelopmentOTP(t *testing.T) {
+	t.Helper()
 	t.Setenv("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "development")
 	t.Setenv("TELESRV_DEV_AUTH_CODE", "12345")
 }
