@@ -7,9 +7,11 @@ authentication attempt succeeds.
 
 ## Routing
 
-- `TELESRV_PHONE_CODE_DELIVERY_PROVIDER=development` preserves the local fixed
-  code. `webhook` generates random SMS codes for login, registration,
-  login-email reset fallback, and phone changes.
+- `TELESRV_PHONE_CODE_DELIVERY_PROVIDER` must be set explicitly; the binary has
+  no phone-code provider default. `development` requires a 4-10 digit
+  `TELESRV_DEV_AUTH_CODE` and accepts that same code for every phone, so use it
+  only for isolated local testing. `webhook` generates random SMS codes for
+  login, registration, login-email reset fallback, and phone changes.
 - `TELESRV_EMAIL_CODE_DELIVERY_PROVIDER=smtp` preserves direct SMTP delivery.
   `webhook` handles login-email, login-email setup, and login-email change.
 - One Webhook endpoint may handle both channels. `channel` and `purpose` in the
@@ -24,7 +26,10 @@ configured external provider.
 
 ## Webhook v1 request
 
-`telesrv` sends one `POST` request and does not follow redirects:
+The webhook secret is mandatory and must contain at least 32 bytes. Every request
+is signed with HMAC-SHA256. Remote webhook endpoints must use HTTPS; plain HTTP
+is allowed only for loopback development endpoints. `telesrv` sends one `POST`
+request and does not follow redirects:
 
 ```http
 POST /v1/otp/deliveries HTTP/1.1
@@ -56,8 +61,8 @@ values are `email` and `sms`.
 `delivery_id` is an opaque idempotency key. Replays of the same ID must not
 send a second message. A resend that creates a new code has a new delivery ID.
 
-When `TELESRV_OTP_WEBHOOK_SECRET` is non-empty, the signature is lowercase hex
-HMAC-SHA256 over:
+The required `TELESRV_OTP_WEBHOOK_SECRET` produces a lowercase-hex HMAC-SHA256
+signature over:
 
 ```text
 <X-Telesrv-Timestamp>.<exact raw JSON request body>

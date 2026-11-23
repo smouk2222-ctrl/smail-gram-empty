@@ -412,7 +412,7 @@ The language-pack file manifest is authoritative. To add a language, place `data
 
 | Setting | Type / code default | Description and constraints |
 |---|---|---|
-| `TELESRV_DEV_AUTH_CODE` | sensitive string / `12345` | Fixed code used by `PHONE_CODE_DELIVERY_PROVIDER=development`; do not expose this default publicly. |
+| `TELESRV_DEV_AUTH_CODE` | secret string / empty | Required only when `TELESRV_PHONE_CODE_DELIVERY_PROVIDER=development`; must be 4-10 digits. There is no built-in fixed-code fallback. |
 | `TELESRV_AUTH_CODE_TTL` | duration / `5m` | Login/registration/email verification code lifetime; must be positive. |
 | `TELESRV_AUTH_CODE_MAX_ATTEMPTS` | int / `5` | Maximum wrong attempts for one code/hash; must be positive. |
 | `TELESRV_PHONE_CODE_LENGTH` | int / `5` | Random SMS-code length for the `webhook` phone provider; allowed range `4..10`. |
@@ -422,10 +422,10 @@ The language-pack file manifest is authoritative. To add a language, place `data
 | `TELESRV_WELCOME_MESSAGE_PHONE_TEMPLATE` | string / built-in English copy | Fallback template for the 777000 login-notification message sent on every completed phone sign-in. Supports the `{{server_name}}` placeholder. Overridden live (no restart) by the admin panel's Server Settings page when set there; this is only the fallback. |
 | `TELESRV_WELCOME_MESSAGE_EMAIL_TEMPLATE` | string / built-in English copy | Same as above, for email sign-ins. |
 | `TELESRV_LOGIN_CODE_MESSAGE_TEMPLATE` | string / built-in English copy | Fallback template for the 777000 login-code delivery message -- one template for every delivery channel (SMS or email). Must contain the `{{code}}` placeholder exactly once; also supports `{{server_name}}`. Overridden live (no restart) by the admin panel's Server Settings page when set there, which rejects a save missing `{{code}}`; this env var is only the fallback. |
-| `TELESRV_PHONE_CODE_DELIVERY_PROVIDER` | enum / `development` | `development` uses fixed codes; `webhook` generates random SMS codes for login, registration, and phone changes. Both modes first commit the same code to the durable 777000 dialog for existing accounts; Webhook is additive. |
+| `TELESRV_PHONE_CODE_DELIVERY_PROVIDER` | enum / empty | Must be set explicitly to `development` or `webhook`. `development` uses the required fixed local-test code; `webhook` generates random SMS codes for login, registration, and phone changes. Both modes first commit the same code to the durable 777000 dialog for existing accounts; Webhook is additive. |
 | `TELESRV_EMAIL_CODE_DELIVERY_PROVIDER` | enum / `smtp` | Delivery implementation for login-email and email setup/change codes: `smtp` or `webhook`. Existing-account login-email codes are first mirrored to 777000; setup/change remains provider-only. |
-| `TELESRV_OTP_WEBHOOK_URL` | absolute URL / empty | Required when any provider selects `webhook`; see [otp-delivery.md](otp-delivery.md) for the fixed v1 contract. Any valid `http://` or `https://` host/IP and port is accepted; userinfo is rejected. |
-| `TELESRV_OTP_WEBHOOK_SECRET` | secret string / empty | Optional HMAC-SHA256 signing secret; enables `X-Telesrv-Signature` when non-empty. |
+| `TELESRV_OTP_WEBHOOK_URL` | absolute URL / empty | Required when any provider selects `webhook`; see [otp-delivery.md](otp-delivery.md) for the fixed v1 contract. Remote endpoints must use HTTPS; HTTP is allowed only for loopback testing. Userinfo is rejected. |
+| `TELESRV_OTP_WEBHOOK_SECRET` | secret string / empty | Required when any provider selects `webhook`; at least 32 bytes. Every request carries an HMAC-SHA256 `X-Telesrv-Signature`. Keep the value outside Git. |
 | `TELESRV_OTP_WEBHOOK_TIMEOUT` | duration / `5s` | Webhook HTTP timeout; must be positive when Webhook delivery is enabled. |
 | `TELESRV_LOGIN_EMAIL_ENABLE` | bool / `false` | Enables login-email verification. SMTP settings are required only when the email provider is `smtp`. |
 | `TELESRV_LOGIN_EMAIL_REQUIRE_SETUP` | bool / `false` | Forces accounts without a login email to configure one. Requires `TELESRV_LOGIN_EMAIL_ENABLE=true`. |
