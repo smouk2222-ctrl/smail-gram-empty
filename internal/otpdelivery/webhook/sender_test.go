@@ -163,6 +163,38 @@ func TestDeliverDoesNotFollowRedirect(t *testing.T) {
 	}
 }
 
+func TestDeliverDoesNotFollowRedirectWithCustomClient(t *testing.T) {
+	targetCalled := make(chan struct{}, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		targetCalled <- struct{}{}
+	}))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", target.URL)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+
+	client := &http.Client{Timeout: time.Second}
+	sender, err := New(Config{URL: server.URL, Secret: testWebhookSecret, Client: client})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = sender.Deliver(context.Background(), validRequest())
+	var rejected *otpdelivery.RejectedError
+	if !errors.As(err, &rejected) || rejected.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("err = %v, want redirect rejection", err)
+	}
+	if client.CheckRedirect != nil {
+		t.Fatal("New mutated the caller-owned HTTP client")
+	}
+	select {
+	case <-targetCalled:
+		t.Fatal("custom HTTP client followed redirect and forwarded OTP")
+	default:
+	}
+}
+
 func validRequest() otpdelivery.Request {
 	return otpdelivery.Request{
 		DeliveryID: "otp_valid",

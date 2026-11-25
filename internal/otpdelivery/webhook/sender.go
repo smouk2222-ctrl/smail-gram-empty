@@ -63,12 +63,16 @@ func New(cfg Config) (*Sender, error) {
 	}
 	client := cfg.Client
 	if client == nil {
-		client = &http.Client{
-			Timeout: cfg.Timeout,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
+		client = &http.Client{Timeout: cfg.Timeout}
+	} else {
+		// Do not mutate a caller-owned client, but enforce the same redirect
+		// policy for injected clients. OTP codes and signatures must never be
+		// forwarded to a redirect target.
+		clientCopy := *client
+		client = &clientCopy
+	}
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 	logger := cfg.Logger
 	if logger == nil {
