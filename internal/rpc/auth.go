@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"container/heap"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -167,28 +168,67 @@ func verifyExportAuthToken(token []byte) (int64, error) {
 
 const exportAuthTokenReplayMaxEntries = 262144
 
-var exportAuthTokenReplay = struct {
-	mu sync.Mutex
-	used map[[32]byte]int64
-}{}
+type exportAuthTokenExpiry struct {
+	digest    [32]byte
+	expiresAt int64
+}
 
-func consumeExportAuthToken(token []byte, expiry, now int64) bool {
-	digest := sha256.Sum256(token)
-	exportAuthTokenReplay.mu.Lock()
-	defer exportAuthTokenReplay.mu.Unlock()
-	if exportAuthTokenReplay.used == nil {
-		exportAuthTokenReplay.used = make(map[[32]byte]int64)
-	}
-	for key, expiresAt := range exportAuthTokenReplay.used {
-		if expiresAt <= now {
-			delete(exportAuthTokenReplay.used, key)
-		}
-	}
-	if _, exists := exportAuthTokenReplay.used[digest]; exists || len(exportAuthTokenReplay.used) >= exportAuthTokenReplayMaxEntries {
+type exportAuthTokenExpiryHeap []exportAuthTokenExpiry
+
+func (h exportAuthTokenExpiryHeap) Len() int           { return len(h) }
+func (h exportAuthTokenExpiryHeap) Less(i, j int) bool { return h[i].expiresAt < h[j].expiresAt }
+func (h exportAuthTokenExpiryHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *exportAuthTokenExpiryHeap) Push(value any) {
+	*h = append(*h, value.(exportAuthTokenExpiry))
+}
+
+func (h *exportAuthTokenExpiryHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	value := old[last]
+	old[last] = exportAuthTokenExpiry{}
+	*h = old[:last]
+	return value
+}
+
+// exportAuthTokenReplayCache bounds one-time token consumption and expires
+// entries in deadline order. A min-heap avoids scanning every live token on
+// every import, which would make a full cache an O(n) CPU cost per request.
+type exportAuthTokenReplayCache struct {
+	mu      sync.Mutex
+	used    map[[32]byte]int64
+	expires exportAuthTokenExpiryHeap
+}
+
+var exportAuthTokenReplay exportAuthTokenReplayCache
+
+func (c *exportAuthTokenReplayCache) consume(token []byte, expiry, now int64) bool {
+	if expiry <= now {
 		return false
 	}
-	exportAuthTokenReplay.used[digest] = expiry
+	digest := sha256.Sum256(token)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.used == nil {
+		c.used = make(map[[32]byte]int64)
+	}
+	for len(c.expires) > 0 && c.expires[0].expiresAt <= now {
+		entry := heap.Pop(&c.expires).(exportAuthTokenExpiry)
+		if storedExpiry, ok := c.used[entry.digest]; ok && storedExpiry == entry.expiresAt {
+			delete(c.used, entry.digest)
+		}
+	}
+	if _, exists := c.used[digest]; exists || len(c.used) >= exportAuthTokenReplayMaxEntries {
+		return false
+	}
+	c.used[digest] = expiry
+	heap.Push(&c.expires, exportAuthTokenExpiry{digest: digest, expiresAt: expiry})
 	return true
+}
+
+func consumeExportAuthToken(token []byte, expiry, now int64) bool {
+	return exportAuthTokenReplay.consume(token, expiry, now)
 }
 
 // onAuthExportAuthorization issues a short-lived signed token proving the
