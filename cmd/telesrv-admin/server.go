@@ -350,7 +350,7 @@ func (s *server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	permissions := newPanelPermissions(identity.permissions)
-	value, err := signSession(s.cfg.SessionKey, sessionClaims{
+	claims := sessionClaims{
 		Actor:       identity.actor,
 		UserID:      identity.userID,
 		Epoch:       identity.epoch,
@@ -358,7 +358,15 @@ func (s *server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 		Nonce:       newCommandID("sess"),
 		Permissions: permissions.List(),
 		CSRF:        csrfToken,
-	})
+	}
+	if identity.userID == 0 {
+		claims.BreakGlassVersion = s.breakGlassSessionVersion()
+		if claims.BreakGlassVersion == "" {
+			writeAPIError(w, http.StatusInternalServerError, "break-glass session configuration is invalid")
+			return
+		}
+	}
+	value, err := signSession(s.cfg.SessionKey, claims)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return

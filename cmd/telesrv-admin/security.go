@@ -262,7 +262,15 @@ func (s *server) requireAuthAPI(next http.Handler) http.Handler {
 // retry able to recover a cookie that was already gone.
 func (s *server) currentSessionPermissions(ctx context.Context, claims sessionClaims) (perms panelPermissions, ok bool, revoked bool) {
 	if claims.UserID == 0 {
-		return newPanelPermissions(claims.Permissions), true, false
+		currentVersion := s.breakGlassSessionVersion()
+		if currentVersion == "" || claims.BreakGlassVersion == "" ||
+			subtle.ConstantTimeCompare([]byte(claims.BreakGlassVersion), []byte(currentVersion)) != 1 {
+			return panelPermissions{}, false, true
+		}
+		// Break-glass permissions live in configuration rather than a database
+		// row. Re-read them on every request so a restart that narrows access
+		// cannot leave an old signed cookie with stale privileges.
+		return newPanelPermissions(s.cfg.Permissions), true, false
 	}
 	if s.read == nil {
 		return panelPermissions{}, false, false

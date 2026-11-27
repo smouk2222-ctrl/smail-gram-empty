@@ -34,6 +34,10 @@ type sessionClaims struct {
 	// per-request revocation check below -- it is the way back in when the
 	// database is unreachable or every named account has been locked out.
 	UserID int64 `json:"uid,omitempty"`
+	// BreakGlassVersion is an HMAC fingerprint of the currently accepted
+	// out-of-band credentials. It is not a password hash; changing or retiring
+	// those credentials invalidates sessions that carry the previous value.
+	BreakGlassVersion string `json:"bgv,omitempty"`
 	// Epoch is the account's token_epoch at the moment this session was minted.
 	//
 	// Permissions travel inside the signed cookie, which is fast but means a
@@ -43,11 +47,9 @@ type sessionClaims struct {
 	// operator, editing their rights or changing their password logs them out
 	// on their very next request.
 	Epoch int32 `json:"epoch,omitempty"`
-	// Permissions is the right set granted to this session. For a named account
-	// it is a snapshot of that row's permissions; for the break-glass operator
-	// it comes from TELESRV_ADMIN_UI_PERMISSIONS. It cannot be edited by the
-	// browser: the HMAC covers it. It is still re-read per request for named
-	// accounts (see Epoch) so an edit narrows access immediately.
+	// Permissions is a signed snapshot. Named-account authorization is re-read
+	// from the database on every request; break-glass authorization is re-read
+	// from current configuration, so stale cookie permissions are never trusted.
 	Permissions []string `json:"permissions,omitempty"`
 	// CSRF is the double-submit token bound to this session. Binding it into the
 	// signed claims is what makes the cookie/header pair unforgeable by a sibling
@@ -56,8 +58,31 @@ type sessionClaims struct {
 	// produce a session cookie that agrees with it.
 	CSRF string `json:"csrf,omitempty"`
 }
+// breakGlassSessionVersion binds stateless break-glass sessions to the current
+ // accepted credentials. The HMAC key is the existing session-signing key, so
+ // no additional secret or persistent credential store is introduced.
+ func (s *server) breakGlassSessionVersion() string {
+ 	if s == nil || len(s.cfg.SessionKey) == 0 {
+ 		return ""
+ 	}
+ 	password := s.cfg.Password
+ 	if password != "" && s.identity != nil &&
+ 		s.identity.TemporaryPasswordMatches(password) && !s.identity.SetupPending() {
+ 		password = ""
+ 	}
+ 	if password == "" && s.cfg.Token == "" {
+ 		return ""
+ 	}
+ 	mac := hmac.New(sha256.New, s.cfg.SessionKey)
+ 	_, _ = mac.Write([]byte("telesrv-admin-break-glass-v1\x00"))
+ 	_, _ = mac.Write([]byte("password\x00"))
+ 	_, _ = mac.Write([]byte(password))
+ 	_, _ = mac.Write([]byte("\x00token\x00"))
+ 	_, _ = mac.Write([]byte(s.cfg.Token))
+ 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+ }
 
-func signSession(key []byte, claims sessionClaims) (string, error) {
+ func signSession(key []byte, claims sessionClaims) (string, error) {
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		return "", err

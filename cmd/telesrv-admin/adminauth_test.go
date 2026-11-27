@@ -282,34 +282,100 @@ func TestCurrentSessionPermissionsFailsClosedWithoutStore(t *testing.T) {
 	}
 }
 
-// The break-glass operator has no row to re-read, so it keeps the configured
-// rights -- that login is the way back in when the database is unreachable.
+// The break-glass operator has no row to re-read. Its credential fingerprint
+// and current configured permissions are checked on every request instead.
 func TestCurrentSessionPermissionsAllowsBreakGlass(t *testing.T) {
-	s := &server{}
-	perms, ok, revoked := s.currentSessionPermissions(t.Context(), sessionClaims{
-		UserID:      0,
+	s := &server{cfg: uiConfig{
+		Token:       "break-glass-token",
+		SessionKey:  []byte("01234567890123456789012345678901"),
 		Permissions: []string{permissionServerManage},
+	}}
+	perms, ok, revoked := s.currentSessionPermissions(t.Context(), sessionClaims{
+		UserID:            0,
+		Permissions:       []string{permissionAll},
+		BreakGlassVersion: s.breakGlassSessionVersion(),
 	})
 	if !ok {
 		t.Fatal("break-glass session rejected")
 	}
 	if revoked {
-		t.Fatal("break-glass session must never report revoked")
+		t.Fatal("valid break-glass session must not report revoked")
 	}
 	if !perms.Has(permissionServerManage) {
 		t.Fatal("break-glass session lost its configured permission")
 	}
 	if perms.Has(permissionAdminsManage) {
-		t.Fatal("break-glass session gained a permission it was not configured with")
+		t.Fatal("break-glass session trusted stale cookie permissions instead of current configuration")
 	}
 }
 
-// A transient failure re-reading a named account's row (the database pool
-// still warming up right after an admin-panel restart, a dropped connection,
-// ...) must refuse this one request without telling requireAuthAPI to clear
-// the session cookie -- otherwise a single slow query outlives its own
-// request and logs the operator out for good, exactly the "Still
-// restarting..." lockout this was written to stop recurring.
+func TestCurrentSessionPermissionsRevokesBreakGlassAfterCredentialRotation(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		rotate func(*server)
+	}{
+		{name: "password", rotate: func(s *server) { s.cfg.Password = "new-break-glass-password" }},
+		{name: "token", rotate: func(s *server) { s.cfg.Token = "new-break-glass-token" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := &server{cfg: uiConfig{
+				Password:    "old-break-glass-password",
+				Token:       "old-break-glass-token",
+				SessionKey:  []byte("01234567890123456789012345678901"),
+				Permissions: []string{permissionServerManage},
+			}}
+			claims := sessionClaims{UserID: 0, BreakGlassVersion: s.breakGlassSessionVersion()}
+			test.rotate(s)
+			if _, ok, revoked := s.currentSessionPermissions(t.Context(), claims); ok || !revoked {
+				t.Fatalf("rotated break-glass credential: ok=%v revoked=%v, want false/true", ok, revoked)
+			}
+		})
+	}
+}
+
+func TestCurrentSessionPermissionsRejectsLegacyBreakGlassSession(t *testing.T) {
+	s := &server{cfg: uiConfig{
+		Token:       "break-glass-token",
+		SessionKey:  []byte("01234567890123456789012345678901"),
+		Permissions: []string{permissionServerManage},
+	}}
+	if _, ok, revoked := s.currentSessionPermissions(t.Context(), sessionClaims{
+		UserID:      0,
+		Permissions: []string{permissionAll},
+	}); ok || !revoked {
+		t.Fatalf("legacy break-glass session: ok=%v revoked=%v, want false/true", ok, revoked)
+	}
+}
+
+func TestBreakGlassSessionRevokedWhenTemporaryPasswordExpires(t *testing.T) {
+	dir := t.TempDir()
+	store := identity.NewStore(dir)
+	if err := os.WriteFile(filepath.Join(dir, ".setup_pending"), nil, 0o600); err != nil {
+		t.Fatalf("write setup marker: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".admin_password_temporary"), []byte("generated-once"), 0o600); err != nil {
+		t.Fatalf("write temporary password marker: %v", err)
+	}
+	s := &server{cfg: uiConfig{
+		Password:    "generated-once",
+		SessionKey:  []byte("01234567890123456789012345678901"),
+		Permissions: []string{permissionServerManage},
+	}, identity: store}
+	version := s.breakGlassSessionVersion()
+	if version == "" {
+		t.Fatal("pending bootstrap password did not produce a credential version")
+	}
+	if err := store.MarkSetupComplete(); err != nil {
+		t.Fatalf("MarkSetupComplete: %v", err)
+	}
+	if _, ok, revoked := s.currentSessionPermissions(t.Context(), sessionClaims{
+		UserID:            0,
+		BreakGlassVersion: version,
+	}); ok || !revoked {
+		t.Fatalf("expired bootstrap credential session: ok=%v revoked=%v, want false/true", ok, revoked)
+	}
+}
+
 func TestClassifySessionStateTransientErrorDoesNotRevoke(t *testing.T) {
 	ok, revoked := classifySessionState(false, 0, 1, errors.New("dial tcp: connection refused"))
 	if ok {

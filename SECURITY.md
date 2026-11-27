@@ -13,7 +13,7 @@ Smail Gram is a self-hosted server fork. Operators are responsible for protectin
 
 ## Admin-panel credentials
 
-Named admin-console accounts require passwords of at least 15 Unicode characters and no more than 72 UTF-8 bytes (bcrypt's input limit). Prefer a randomly generated passphrase from a password manager. This policy applies when creating or resetting named operator passwords; it does not silently rewrite existing password hashes. MFA is not implemented yet, so keep the panel on loopback or behind HTTPS plus a separate access-control layer, and do not treat the password rule as a substitute for MFA.
+Named admin-console accounts require passwords of at least 15 Unicode characters and no more than 72 UTF-8 bytes (bcrypt's input limit). Prefer a randomly generated passphrase from a password manager. This policy applies when creating or resetting named operator passwords; it does not silently rewrite existing password hashes. Break-glass sessions are bound to an HMAC fingerprint of the currently accepted out-of-band password/token and are revoked when either credential rotates or the temporary bootstrap password expires. Their permissions are read from current configuration on every request, not trusted from an older cookie snapshot. MFA is not implemented yet, so keep the panel on loopback or behind HTTPS plus a separate access-control layer, and do not treat the password rule as a substitute for MFA.
 
 ## Custodial donations
 

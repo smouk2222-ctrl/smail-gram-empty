@@ -47,6 +47,41 @@ func TestSPAFallbackSmoke(t *testing.T) {
 	}
 }
 
+func TestBreakGlassLoginStoresCredentialVersion(t *testing.T) {
+	key := []byte("01234567890123456789012345678901")
+	srv := &server{cfg: uiConfig{
+		Token:       "break-glass-token",
+		SessionKey:  key,
+		Permissions: []string{permissionServerManage},
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(
+		`{"username":"owpengram","secret":"break-glass-token"}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.handleAPILogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var sessionCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == sessionCookieName {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("break-glass login did not set a session cookie")
+	}
+	claims, ok := verifySession(key, sessionCookie.Value, time.Now())
+	if !ok {
+		t.Fatal("break-glass session cookie did not verify")
+	}
+	if claims.BreakGlassVersion == "" || claims.BreakGlassVersion != srv.breakGlassSessionVersion() {
+		t.Fatalf("break-glass version = %q, want the current credential fingerprint", claims.BreakGlassVersion)
+	}
+}
+
 func TestAdminAPIURLDefaultUsesAdminAPIPort(t *testing.T) {
 	if got, want := adminAPIURL(""), "http://127.0.0.1:2599"; got != want {
 		t.Fatalf("adminAPIURL(empty) = %q, want %q", got, want)
