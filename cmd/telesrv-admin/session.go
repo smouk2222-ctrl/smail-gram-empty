@@ -55,30 +55,6 @@ type sessionClaims struct {
 	CSRF string `json:"csrf,omitempty"`
 }
 // breakGlassSessionVersion binds stateless break-glass sessions to the current
- // accepted credentials. The HMAC key is the existing session-signing key, so
- // no additional secret or persistent credential store is introduced.
- func (s *server) breakGlassSessionVersion() string {
- 	if s == nil || len(s.cfg.SessionKey) == 0 {
- 		return ""
- 	}
- 	password := s.cfg.Password
- 	if password != "" && s.identity != nil &&
- 		s.identity.TemporaryPasswordMatches(password) && !s.identity.SetupPending() {
- 		password = ""
- 	}
- 	if password == "" && s.cfg.Token == "" {
- 		return ""
- 	}
- 	mac := hmac.New(sha256.New, s.cfg.SessionKey)
- 	_, _ = mac.Write([]byte("telesrv-admin-break-glass-v1\x00"))
- 	_, _ = mac.Write([]byte("password\x00"))
- 	_, _ = mac.Write([]byte(password))
- 	_, _ = mac.Write([]byte("\x00token\x00"))
- 	_, _ = mac.Write([]byte(s.cfg.Token))
- 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
- }
-
- // breakGlassSessionVersion binds stateless break-glass sessions to the current
 // accepted credentials. The HMAC key is the existing session-signing key, so
 // no additional secret or persistent credential store is introduced.
 func (s *server) breakGlassSessionVersion() string {
