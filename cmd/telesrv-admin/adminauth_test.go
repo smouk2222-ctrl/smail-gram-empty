@@ -376,6 +376,12 @@ func TestBreakGlassSessionRevokedWhenTemporaryPasswordExpires(t *testing.T) {
 	}
 }
 
+// A transient failure re-reading a named account's row (the database pool
+// still warming up right after an admin-panel restart, a dropped connection,
+// ...) must refuse this one request without telling requireAuthAPI to clear
+// the session cookie -- otherwise a single slow query outlives its own
+// request and logs the operator out for good, exactly the "Still
+// restarting..." lockout this was written to stop recurring.
 func TestClassifySessionStateTransientErrorDoesNotRevoke(t *testing.T) {
 	ok, revoked := classifySessionState(false, 0, 1, errors.New("dial tcp: connection refused"))
 	if ok {
