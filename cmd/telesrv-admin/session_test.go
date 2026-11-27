@@ -47,6 +47,41 @@ func TestSPAFallbackSmoke(t *testing.T) {
 	}
 }
 
+func TestBreakGlassLoginStoresCredentialVersion(t *testing.T) {
+	key := []byte("01234567890123456789012345678901")
+	srv := &server{cfg: uiConfig{
+		Token:       "break-glass-token",
+		SessionKey:  key,
+		Permissions: []string{permissionServerManage},
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(
+		`{"username":"owpengram","secret":"break-glass-token"}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.handleAPILogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var sessionCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == sessionCookieName {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("break-glass login did not set a session cookie")
+	}
+	claims, ok := verifySession(key, sessionCookie.Value, time.Now())
+	if !ok {
+		t.Fatal("break-glass session cookie did not verify")
+	}
+	if claims.BreakGlassVersion == "" || claims.BreakGlassVersion != srv.breakGlassSessionVersion() {
+		t.Fatalf("break-glass version = %q, want the current credential fingerprint", claims.BreakGlassVersion)
+	}
+}
+
 func TestAdminAPIURLDefaultUsesAdminAPIPort(t *testing.T) {
 	if got, want := adminAPIURL(""), "http://127.0.0.1:2599"; got != want {
 		t.Fatalf("adminAPIURL(empty) = %q, want %q", got, want)
@@ -327,5 +362,36 @@ func TestEscapeLikePatternKeepsUsernameSearchLiteral(t *testing.T) {
 	}
 	if got := escapeLikePattern(""); got != "" {
 		t.Fatalf("escapeLikePattern empty = %q", got)
+	}
+}
+
+
+func TestAdminCookiesSetSecureAttributeWhenConfigured(t *testing.T) {
+	rec := httptest.NewRecorder()
+	setCSRFCookie(rec, "csrf-token", time.Hour, true)
+	csrf := rec.Result().Cookies()
+	if len(csrf) != 1 || csrf[0].Name != csrfCookieName || !csrf[0].Secure {
+		t.Fatalf("CSRF cookie = %+v, want Secure=true", csrf)
+	}
+
+	rec = httptest.NewRecorder()
+	clearSessionCookie(rec, true)
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 2 {
+		t.Fatalf("clear cookies = %d, want 2", len(cookies))
+	}
+	for _, cookie := range cookies {
+		if !cookie.Secure || cookie.MaxAge >= 0 {
+			t.Fatalf("clearing cookie = %+v, want Secure and expired", cookie)
+		}
+	}
+}
+
+func TestAdminCookiesRemainUsableForLoopbackHTTPDevelopment(t *testing.T) {
+	rec := httptest.NewRecorder()
+	setCSRFCookie(rec, "csrf-token", time.Hour, false)
+	cookies := rec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Secure {
+		t.Fatalf("development CSRF cookie = %+v, want Secure=false", cookies)
 	}
 }

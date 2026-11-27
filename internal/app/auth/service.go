@@ -395,7 +395,20 @@ func (s *Service) BindTempAuthKey(ctx context.Context, sessionID int64, binding 
 	return result, nil
 }
 
-// ResolveAuthKey 将已绑定的 temp auth_key 解析为对应 perm auth_key。
+// DropTempAuthKeys removes stale temporary keys bound to one permanent auth key.
+// A missing or temporary parent is rejected rather than broadening the deletion scope.
+func (s *Service) DropTempAuthKeys(ctx context.Context, permAuthKeyID int64, exceptAuthKeyIDs []int64) ([][8]byte, error) {
+	if s == nil || s.tempKeys == nil {
+		return nil, errors.New("temporary auth key store unavailable")
+	}
+	removed, err := s.tempKeys.DeleteByPermExcept(ctx, permAuthKeyID, exceptAuthKeyIDs)
+	if errors.Is(err, store.ErrAuthKeyNotFound) || errors.Is(err, store.ErrAuthKeyBindingInvalid) {
+		return nil, ErrAuthKeyPermEmpty
+	}
+	return removed, err
+}
+
+// ResolveAuthKey 将已绑定的 temp auth_key 解析为对应 perm auth_key.
 //
 // temp→perm 是握手/绑定形成的协议身份关系，与 perm 当前是否登录完全无关。即使
 // auth.logOut 已删除 authorization，只要绑定仍存在，后续登录 RPC 也必须继续落到同一

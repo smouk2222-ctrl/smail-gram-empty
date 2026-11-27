@@ -17,8 +17,10 @@ import (
 	"telesrv/internal/otpdelivery"
 )
 
+const testWebhookSecret = "0123456789abcdef0123456789abcdef"
+
 func TestDeliverSendsVersionedSignedRequest(t *testing.T) {
-	secret := "webhook-secret"
+	secret := testWebhookSecret
 	var got requestBody
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -73,13 +75,27 @@ func TestDeliverSendsVersionedSignedRequest(t *testing.T) {
 	}
 }
 
+func TestNewRequiresStrongSecret(t *testing.T) {
+	for _, secret := range []string{"", "short", "0123456789abcdef0123456789abcde"} {
+		if _, err := New(Config{URL: "https://otp.example.test/v1/deliveries", Secret: secret}); err == nil {
+			t.Fatalf("New accepted a weak secret of length %d", len(secret))
+		}
+	}
+}
+
+func TestNewRejectsRemoteHTTP(t *testing.T) {
+	if _, err := New(Config{URL: "http://otp.example.test/v1/deliveries", Secret: testWebhookSecret}); err == nil {
+		t.Fatal("New accepted a non-loopback HTTP OTP webhook endpoint")
+	}
+}
+
 func TestDeliverExplicitRejectionIsDefinite(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = io.WriteString(w, `{"accepted":false,"error_code":"RATE_LIMITED","retryable":true}`)
 	}))
 	defer server.Close()
-	sender, err := New(Config{URL: server.URL})
+	sender, err := New(Config{URL: server.URL, Secret: testWebhookSecret})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -98,7 +114,7 @@ func TestDeliverMalformedSuccessIsOutcomeUnknown(t *testing.T) {
 		_, _ = io.WriteString(w, `{}`)
 	}))
 	defer server.Close()
-	sender, err := New(Config{URL: server.URL})
+	sender, err := New(Config{URL: server.URL, Secret: testWebhookSecret})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -112,7 +128,7 @@ func TestDeliverTransportFailureIsOutcomeUnknown(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("connection reset after write")
 	})}
-	sender, err := New(Config{URL: "https://otp.example.test/send", Client: client})
+	sender, err := New(Config{URL: "https://otp.example.test/send", Secret: testWebhookSecret, Client: client})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -133,7 +149,7 @@ func TestDeliverDoesNotFollowRedirect(t *testing.T) {
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	}))
 	defer server.Close()
-	sender, err := New(Config{URL: server.URL})
+	sender, err := New(Config{URL: server.URL, Secret: testWebhookSecret})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -144,6 +160,38 @@ func TestDeliverDoesNotFollowRedirect(t *testing.T) {
 	}
 	if targetCalled {
 		t.Fatal("redirect target received OTP")
+	}
+}
+
+func TestDeliverDoesNotFollowRedirectWithCustomClient(t *testing.T) {
+	targetCalled := make(chan struct{}, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		targetCalled <- struct{}{}
+	}))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", target.URL)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+
+	client := &http.Client{Timeout: time.Second}
+	sender, err := New(Config{URL: server.URL, Secret: testWebhookSecret, Client: client})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = sender.Deliver(context.Background(), validRequest())
+	var rejected *otpdelivery.RejectedError
+	if !errors.As(err, &rejected) || rejected.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("err = %v, want redirect rejection", err)
+	}
+	if client.CheckRedirect != nil {
+		t.Fatal("New mutated the caller-owned HTTP client")
+	}
+	select {
+	case <-targetCalled:
+		t.Fatal("custom HTTP client followed redirect and forwarded OTP")
+	default:
 	}
 }
 

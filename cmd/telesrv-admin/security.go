@@ -204,7 +204,7 @@ func (s *server) requireAuthAPI(next http.Handler) http.Handler {
 		}
 		claims, ok := verifySession(s.cfg.SessionKey, cookie.Value, time.Now())
 		if !ok {
-			clearSessionCookie(w)
+			clearSessionCookie(w, s.cfg.CookieSecure || r.TLS != nil)
 			writeAPIError(w, http.StatusUnauthorized, "not authenticated")
 			return
 		}
@@ -229,7 +229,7 @@ func (s *server) requireAuthAPI(next http.Handler) http.Handler {
 			// here turned one slow request into a permanent 401 storm
 			// until the operator logged back in by hand.
 			if revoked {
-				clearSessionCookie(w)
+				clearSessionCookie(w, s.cfg.CookieSecure || r.TLS != nil)
 			}
 			writeAPIError(w, http.StatusUnauthorized, "session is no longer valid")
 			return
@@ -262,7 +262,15 @@ func (s *server) requireAuthAPI(next http.Handler) http.Handler {
 // retry able to recover a cookie that was already gone.
 func (s *server) currentSessionPermissions(ctx context.Context, claims sessionClaims) (perms panelPermissions, ok bool, revoked bool) {
 	if claims.UserID == 0 {
-		return newPanelPermissions(claims.Permissions), true, false
+		currentVersion := s.breakGlassSessionVersion()
+		if currentVersion == "" || claims.BreakGlassVersion == "" ||
+			subtle.ConstantTimeCompare([]byte(claims.BreakGlassVersion), []byte(currentVersion)) != 1 {
+			return panelPermissions{}, false, true
+		}
+		// Break-glass permissions live in configuration rather than a database
+		// row. Re-read them on every request so a restart that narrows access
+		// cannot leave an old signed cookie with stale privileges.
+		return newPanelPermissions(s.cfg.Permissions), true, false
 	}
 	if s.read == nil {
 		return panelPermissions{}, false, false

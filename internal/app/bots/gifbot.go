@@ -2,6 +2,7 @@ package bots
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
@@ -81,13 +82,16 @@ func (s *Service) OnInlineQuery(ctx context.Context, botUserID, _ int64, query, 
 	for _, d := range docs {
 		byID[d.ID] = d
 	}
+	for _, entry := range entries {
+		if _, ok := byID[entry.DocumentID]; !ok {
+			return domain.BotInlineResults{}, true, fmt.Errorf("gif catalog entry %d references missing document %d", entry.ID, entry.DocumentID)
+		}
+	}
 	results := make([]domain.BotInlineResult, 0, len(entries))
 	for _, e := range entries {
 		doc, ok := byID[e.DocumentID]
 		if !ok {
-			// Catalog entry outlived its document (shouldn't happen -- documents
-			// are never deleted -- but skip rather than surface a broken result).
-			continue
+			return domain.BotInlineResults{}, false, fmt.Errorf("gif catalog entry %d references missing document %d", e.ID, e.DocumentID)
 		}
 		docCopy := doc
 		results = append(results, domain.BotInlineResult{

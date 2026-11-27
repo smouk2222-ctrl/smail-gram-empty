@@ -55,3 +55,4 @@ func (r *Router) NotifyAccountFreezeChanged(_ context.Context, freeze domain.Acc
 	}
 	return nil
 }
+

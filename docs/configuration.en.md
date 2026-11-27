@@ -393,6 +393,15 @@ no separate service, no address, and no password to configure.
 | `TELESRV_POSTGRES_MIN_CONNS` | int / `16` | pgxpool pre-warmed minimum connections. |
 | `TELESRV_LANGPACK_SEED_DIR` | path / `data/langpack` | TDesktop `.strings` language-pack seed directory. |
 | `TELESRV_BLOB_DIR` | path / `data/blobs` | Local development blob-backend root for media bytes. |
+| `TELESRV_BLOB_BACKEND` | enum / inferred | `localfs` or `s3`; inferred as `s3` when an S3 endpoint is configured, otherwise `localfs`. |
+| `TELESRV_BLOB_STAGING_DIR` | path / `data/blob-staging` | Required temporary staging directory when the S3 backend is selected. |
+| `TELESRV_S3_ENDPOINT` | host[:port] / empty | S3-compatible endpoint without a URL scheme; required with the S3 backend. |
+| `TELESRV_S3_BUCKET` | string / empty | Required bucket name when the S3 backend is selected. |
+| `TELESRV_S3_ACCESS_KEY_ID` / `TELESRV_S3_SECRET_ACCESS_KEY` | secrets / empty | Both are required when the S3 backend is selected. Never commit real credentials. |
+| `TELESRV_S3_USE_SSL` | bool / `true` | HTTPS is enabled by default so S3 credentials and object traffic are encrypted in transit. Set `false` only for a trusted local MinIO/test endpoint without TLS. |
+| `TELESRV_S3_REGION` | string / `us-east-1` | S3 signing region. |
+| `TELESRV_S3_PATH_STYLE` | bool / `true` | Use path-style bucket addressing; usually required by self-hosted MinIO. |
+| `TELESRV_S3_CREATE_BUCKET` | bool / `false` | Create the configured bucket at startup if it does not exist. |
 | `TELESRV_STICKER_SEED_DIR` | path / `data/sticker-seed` | Sticker/reaction seed packages imported into documents, sticker sets, and blobs. |
 | `TELESRV_STICKER_SEED_MAX_SETS` | int / `300` | Maximum regular sticker sets imported at startup; `<=0` means unlimited. |
 | `TELESRV_PREMIUM_PROMO_SEED_DIR` | path / `data/premium-promo` | Exported `help.getPremiumPromo` manifest, MP4 videos, and JPEG thumbnails. A missing directory keeps the no-video fallback; an existing invalid/incomplete directory fails startup. |
@@ -403,7 +412,7 @@ The language-pack file manifest is authoritative. To add a language, place `data
 
 | Setting | Type / code default | Description and constraints |
 |---|---|---|
-| `TELESRV_DEV_AUTH_CODE` | sensitive string / `12345` | Fixed code used by `PHONE_CODE_DELIVERY_PROVIDER=development`; do not expose this default publicly. |
+| `TELESRV_DEV_AUTH_CODE` | secret string / empty | Required only when `TELESRV_PHONE_CODE_DELIVERY_PROVIDER=development`; must be 4-10 digits. There is no built-in fixed-code fallback. |
 | `TELESRV_AUTH_CODE_TTL` | duration / `5m` | Login/registration/email verification code lifetime; must be positive. |
 | `TELESRV_AUTH_CODE_MAX_ATTEMPTS` | int / `5` | Maximum wrong attempts for one code/hash; must be positive. |
 | `TELESRV_PHONE_CODE_LENGTH` | int / `5` | Random SMS-code length for the `webhook` phone provider; allowed range `4..10`. |
@@ -413,10 +422,10 @@ The language-pack file manifest is authoritative. To add a language, place `data
 | `TELESRV_WELCOME_MESSAGE_PHONE_TEMPLATE` | string / built-in English copy | Fallback template for the 777000 login-notification message sent on every completed phone sign-in. Supports the `{{server_name}}` placeholder. Overridden live (no restart) by the admin panel's Server Settings page when set there; this is only the fallback. |
 | `TELESRV_WELCOME_MESSAGE_EMAIL_TEMPLATE` | string / built-in English copy | Same as above, for email sign-ins. |
 | `TELESRV_LOGIN_CODE_MESSAGE_TEMPLATE` | string / built-in English copy | Fallback template for the 777000 login-code delivery message -- one template for every delivery channel (SMS or email). Must contain the `{{code}}` placeholder exactly once; also supports `{{server_name}}`. Overridden live (no restart) by the admin panel's Server Settings page when set there, which rejects a save missing `{{code}}`; this env var is only the fallback. |
-| `TELESRV_PHONE_CODE_DELIVERY_PROVIDER` | enum / `development` | `development` uses fixed codes; `webhook` generates random SMS codes for login, registration, and phone changes. Both modes first commit the same code to the durable 777000 dialog for existing accounts; Webhook is additive. |
+| `TELESRV_PHONE_CODE_DELIVERY_PROVIDER` | enum / empty | Must be set explicitly to `development` or `webhook`. `development` uses the required fixed local-test code; `webhook` generates random SMS codes for login, registration, and phone changes. Both modes first commit the same code to the durable 777000 dialog for existing accounts; Webhook is additive. |
 | `TELESRV_EMAIL_CODE_DELIVERY_PROVIDER` | enum / `smtp` | Delivery implementation for login-email and email setup/change codes: `smtp` or `webhook`. Existing-account login-email codes are first mirrored to 777000; setup/change remains provider-only. |
-| `TELESRV_OTP_WEBHOOK_URL` | absolute URL / empty | Required when any provider selects `webhook`; see [otp-delivery.md](otp-delivery.md) for the fixed v1 contract. Any valid `http://` or `https://` host/IP and port is accepted; userinfo is rejected. |
-| `TELESRV_OTP_WEBHOOK_SECRET` | secret string / empty | Optional HMAC-SHA256 signing secret; enables `X-Telesrv-Signature` when non-empty. |
+| `TELESRV_OTP_WEBHOOK_URL` | absolute URL / empty | Required when any provider selects `webhook`; see [otp-delivery.md](otp-delivery.md) for the fixed v1 contract. Remote endpoints must use HTTPS; HTTP is allowed only for loopback testing. Userinfo is rejected. |
+| `TELESRV_OTP_WEBHOOK_SECRET` | secret string / empty | Required when any provider selects `webhook`; at least 32 bytes. Every request carries an HMAC-SHA256 `X-Telesrv-Signature`. Keep the value outside Git. |
 | `TELESRV_OTP_WEBHOOK_TIMEOUT` | duration / `5s` | Webhook HTTP timeout; must be positive when Webhook delivery is enabled. |
 | `TELESRV_LOGIN_EMAIL_ENABLE` | bool / `false` | Enables login-email verification. SMTP settings are required only when the email provider is `smtp`. |
 | `TELESRV_LOGIN_EMAIL_REQUIRE_SETUP` | bool / `false` | Forces accounts without a login email to configure one. Requires `TELESRV_LOGIN_EMAIL_ENABLE=true`. |
@@ -536,6 +545,7 @@ path. `TELESRV_PUBLIC_BASE_URL` must resolve to that proxy for moderation freeze
 | `TELESRV_STARS_MONTHLY_CLAIM_INTERVAL` | duration / `720h` | Cooldown between successful `/claim` uses, counted from the previous claim. |
 | `TELESRV_PREMIUM_SWEEP_INTERVAL` | duration / `1m` | Expired-premium cleanup/push interval. Read paths derive expiry independently. |
 | `TELESRV_PREMIUM_SWEEP_BATCH` | int / `500` | Maximum expired premium rows processed per sweep. |
+| `TELESRV_DONATIONS_ENABLED` | bool / `false` | Enables the custodial crypto wallet, `/deposit`, and chain watchers. Opt in only after reviewing custody/key backup and chain configuration; disabling leaves an existing wallet and funds dormant, not deleted. |
 
 ### Composite account rating and collectible usernames
 

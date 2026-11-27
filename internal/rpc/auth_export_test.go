@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
+	"sync"
 	"testing"
 	"time"
 )
@@ -17,6 +18,9 @@ func TestExportAuthTokenRoundTrip(t *testing.T) {
 	}
 	if got != userID {
 		t.Fatalf("got userID %d, want %d", got, userID)
+	}
+	if _, err := verifyExportAuthToken(token); err == nil {
+		t.Fatal("expected reused export auth token to fail")
 	}
 }
 
@@ -40,12 +44,79 @@ func TestExportAuthTokenRejectsExpired(t *testing.T) {
 	// (as opposed to the HMAC check).
 	payload := make([]byte, 16, 48)
 	binary.BigEndian.PutUint64(payload[0:8], uint64(1780243201))
-	binary.BigEndian.PutUint64(payload[8:16], uint64(time.Now().Add(-time.Minute).Unix()))
+	binary.BigEndian.PutUint64(payload[8:16], uint64(time.Now().Add(-time.Minute).UnixNano()))
 	mac := hmac.New(sha256.New, exportAuthSecret)
 	mac.Write(payload)
 	token := mac.Sum(payload)
 
 	if _, err := verifyExportAuthToken(token); err == nil {
 		t.Fatal("expected expired token to fail verification")
+	}
+}
+
+func TestExportAuthTokenReplayCacheExpiresEntriesInDeadlineOrder(t *testing.T) {
+	var cache exportAuthTokenReplayCache
+	liveToken := []byte("live-token")
+	expiredToken := []byte("expired-token")
+	nextToken := []byte("next-token")
+
+	if !cache.consume(liveToken, 300, 100) {
+		t.Fatal("expected live token to be recorded")
+	}
+	if !cache.consume(expiredToken, 150, 100) {
+		t.Fatal("expected second token to be recorded")
+	}
+	if cache.consume(expiredToken, 150, 100) {
+		t.Fatal("expected duplicate token to be rejected")
+	}
+	if !cache.consume(nextToken, 400, 150) {
+		t.Fatal("expected next token to be recorded after expired entry cleanup")
+	}
+
+	if _, ok := cache.used[sha256.Sum256(expiredToken)]; ok {
+		t.Fatal("expired token remained in replay cache")
+	}
+	if got := cache.used[sha256.Sum256(liveToken)]; got != 300 {
+		t.Fatalf("live token expiry = %d, want 300", got)
+	}
+	if len(cache.used) != 2 || len(cache.expires) != 2 {
+		t.Fatalf("cache sizes = map:%d heap:%d, want 2/2", len(cache.used), len(cache.expires))
+	}
+}
+
+func TestExportAuthTokenReplayCacheRejectsExpiredEntry(t *testing.T) {
+	var cache exportAuthTokenReplayCache
+	if cache.consume([]byte("expired-token"), 100, 100) {
+		t.Fatal("expected already-expired token to be rejected")
+	}
+	if len(cache.used) != 0 || len(cache.expires) != 0 {
+		t.Fatalf("expired token was retained: map:%d heap:%d", len(cache.used), len(cache.expires))
+	}
+}
+
+func TestExportAuthTokenConcurrentImportConsumesOnce(t *testing.T) {
+	token := signExportAuthToken(1780243202)
+
+	const attempts = 32
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		successes int
+	)
+	wg.Add(attempts)
+	for i := 0; i < attempts; i++ {
+		go func() {
+			defer wg.Done()
+			if _, err := verifyExportAuthToken(token); err == nil {
+				mu.Lock()
+				successes++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if successes != 1 {
+		t.Fatalf("successful imports = %d, want exactly one", successes)
 	}
 }

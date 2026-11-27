@@ -1,0 +1,87 @@
+name: Build Linux server binaries
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "smail-gram/security-defaults"
+    paths:
+      - ".github/workflows/build-server-binaries.yml"
+      - ".devcontainer/devcontainer.json"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/telesrv-admin/web/**"
+  pull_request:
+    paths:
+      - ".github/workflows/build-server-binaries.yml"
+      - ".devcontainer/devcontainer.json"
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "cmd/telesrv-admin/web/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            goarch: amd64
+          - arch: arm64
+            goarch: arm64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify Codespaces ports are private by default
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          config = json.loads(Path(".devcontainer/devcontainer.json").read_text(encoding="utf-8"))
+          ports = config.get("portsAttributes", {})
+          for port in ("2600", "2398", "2401"):
+              attributes = ports.get(port)
+              if not isinstance(attributes, dict) or attributes.get("visibility") != "private":
+                  raise SystemExit(f"Codespaces port {port} must remain private by default")
+          if ports["2398"].get("onAutoForward") != "notify":
+              raise SystemExit("Codespaces MTProto port 2398 must notify when auto-forwarded")
+          PY
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build server, admin panel, and supervisor
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist/bin
+          go build -trimpath -ldflags="-s -w" -o dist/bin/owpengram-server ./cmd/telesrv
+          go build -trimpath -ldflags="-s -w" -o dist/bin/telesrv-admin ./cmd/telesrv-admin
+          go build -trimpath -ldflags="-s -w" -o dist/bin/owpengram-ctl ./cmd/owpengram-ctl
+          chmod +x dist/bin/*
+          tar -C dist -czf "owpengram-linux-${{ matrix.arch }}.tar.gz" bin
+
+      - name: Upload Linux binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: owpengram-linux-${{ matrix.arch }}
+          path: owpengram-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14

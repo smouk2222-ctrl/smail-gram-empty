@@ -367,6 +367,8 @@ func (s *Service) Search(ctx context.Context, userID int64, query string, limit 
 	if err != nil {
 		return domain.UserSearchResult{}, err
 	}
+	res.MyResults = dedupeSearchUsers(res.MyResults)
+	res.Results = dedupeSearchUsers(res.Results)
 	if s.hideThirdPartyVerification {
 		res.MyResults = filterOutUserID(res.MyResults, domain.VerifierBotUserID)
 		res.Results = filterOutUserID(res.Results, domain.VerifierBotUserID)
@@ -410,6 +412,26 @@ func (s *Service) Search(ctx context.Context, userID int64, query string, limit 
 		res.Results = filterSearchUsers(res.Results, allowed)
 	}
 	return s.projectSearchResult(ctx, userID, res)
+}
+
+func dedupeSearchUsers(users []domain.User) []domain.User {
+	if len(users) < 2 {
+		return users
+	}
+	seen := make(map[int64]struct{}, len(users))
+	out := users[:0]
+	for _, user := range users {
+		if user.ID == 0 {
+			out = append(out, user)
+			continue
+		}
+		if _, ok := seen[user.ID]; ok {
+			continue
+		}
+		seen[user.ID] = struct{}{}
+		out = append(out, user)
+	}
+	return out
 }
 
 func (s *Service) DeleteContacts(ctx context.Context, userID int64, contactUserIDs []int64) (int, error) {

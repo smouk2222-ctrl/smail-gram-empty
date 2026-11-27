@@ -45,6 +45,7 @@ type ReadModelCacheSet struct {
 
 type UserProjectionFactReadModelCache interface {
 	InvalidateAccountFreezeFact(userID int64)
+	InvalidateCollectiblePhoneFact(userID int64)
 	FlushUserProjectionFactReadModel()
 }
 
@@ -435,6 +436,7 @@ func (l *ReadModelChangeListener) handlePayload(payload string) {
 			// caches until unrelated LRU pressure removes them.
 			if l.caches.UserProjectionFacts != nil {
 				l.caches.UserProjectionFacts.InvalidateAccountFreezeFact(evt.PeerID)
+				l.caches.UserProjectionFacts.InvalidateCollectiblePhoneFact(evt.PeerID)
 			}
 			if l.caches.PeerIdentities != nil {
 				l.caches.PeerIdentities.InvalidatePeerIdentityReadModel(domain.Peer{Type: domain.PeerTypeUser, ID: evt.PeerID})
@@ -459,6 +461,20 @@ func (l *ReadModelChangeListener) handlePayload(payload string) {
 			}
 			if cache, ok := l.caches.Privacy.(PrivacyViewerFactsReadModelCache); ok {
 				cache.InvalidateViewerFacts(evt.PeerID)
+			}
+		}
+	case "user_collectible_phone":
+		if evt.PeerType == "user" && evt.PeerID != 0 {
+			if l.caches.UserProjectionFacts != nil {
+				l.caches.UserProjectionFacts.InvalidateCollectiblePhoneFact(evt.PeerID)
+			}
+			// The base-user Redis snapshot may carry phone identity alongside
+			// the ordinary profile fields; evict it before the next projection.
+			if l.caches.BaseUsers != nil {
+				if err := l.caches.BaseUsers.Delete(context.Background(), []int64{evt.PeerID}); err != nil {
+					l.log.Warn("invalidate base user cache on collectible phone event",
+						zap.Int64("user_id", evt.PeerID), zap.Error(err))
+				}
 			}
 		}
 	case "user_visibility":

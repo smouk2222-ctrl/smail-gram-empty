@@ -10,6 +10,8 @@ import (
 	"telesrv/internal/domain"
 )
 
+const testOTPWebhookSecret = "0123456789abcdef0123456789abcdef"
+
 func TestLoadDefaultsAdvertiseIPToLoopback(t *testing.T) {
 	disableDefaultConfigFile(t)
 	t.Setenv("TELESRV_ADVERTISE_IP", "")
@@ -418,6 +420,25 @@ func TestLoadS3BlobStorageConfig(t *testing.T) {
 	}
 	if cfg.S3UseSSL || !cfg.S3PathStyle || !cfg.S3CreateBucket {
 		t.Fatalf("unexpected s3 flags: ssl=%v path_style=%v create=%v", cfg.S3UseSSL, cfg.S3PathStyle, cfg.S3CreateBucket)
+	}
+}
+
+func TestLoadS3BlobStorageDefaultsToTLS(t *testing.T) {
+	disableDefaultConfigFile(t)
+	t.Setenv("TELESRV_BLOB_BACKEND", "s3")
+	t.Setenv("TELESRV_BLOB_STAGING_DIR", "data/blob-staging")
+	t.Setenv("TELESRV_S3_ENDPOINT", "s3.example.test")
+	t.Setenv("TELESRV_S3_BUCKET", "telesrv-media")
+	t.Setenv("TELESRV_S3_ACCESS_KEY_ID", "access")
+	t.Setenv("TELESRV_S3_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("TELESRV_S3_USE_SSL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.S3UseSSL {
+		t.Fatal("S3UseSSL = false, want TLS enabled by default")
 	}
 }
 
@@ -965,6 +986,28 @@ func TestLoadBusinessAIProviderDefaultsToEcho(t *testing.T) {
 	}
 }
 
+func TestLoadRequiresExplicitPhoneCodeDeliveryProvider(t *testing.T) {
+	disableDefaultConfigFile(t)
+	t.Setenv("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "")
+	t.Setenv("TELESRV_DEV_AUTH_CODE", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load succeeded without an explicit phone-code delivery provider")
+	}
+}
+
+func TestLoadDevelopmentPhoneCodeRequiresExplicitNumericCode(t *testing.T) {
+	for _, code := range []string{"", "12x45", "123", "12345678901"} {
+		t.Run(fmt.Sprintf("code_%q", code), func(t *testing.T) {
+			disableDefaultConfigFile(t)
+			t.Setenv("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "development")
+			t.Setenv("TELESRV_DEV_AUTH_CODE", code)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted invalid development auth code %q", code)
+			}
+		})
+	}
+}
+
 func TestLoadLoginEmailDefaultsDisabled(t *testing.T) {
 	disableDefaultConfigFile(t)
 
@@ -1037,7 +1080,7 @@ func TestLoadLoginEmailWebhookDoesNotRequireSMTP(t *testing.T) {
 	t.Setenv("TELESRV_LOGIN_EMAIL_ENABLE", "true")
 	t.Setenv("TELESRV_EMAIL_CODE_DELIVERY_PROVIDER", "webhook")
 	t.Setenv("TELESRV_OTP_WEBHOOK_URL", "https://otp.example.test/v1/deliveries")
-	t.Setenv("TELESRV_OTP_WEBHOOK_SECRET", "test-secret")
+	t.Setenv("TELESRV_OTP_WEBHOOK_SECRET", testOTPWebhookSecret)
 	t.Setenv("TELESRV_OTP_WEBHOOK_TIMEOUT", "3s")
 	t.Setenv("TELESRV_SMTP_HOST", "")
 
@@ -1046,7 +1089,7 @@ func TestLoadLoginEmailWebhookDoesNotRequireSMTP(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.EmailCodeDeliveryProvider != "webhook" || cfg.OTPWebhookURL != "https://otp.example.test/v1/deliveries" ||
-		cfg.OTPWebhookSecret != "test-secret" || cfg.OTPWebhookTimeout != 3*time.Second {
+		cfg.OTPWebhookSecret != testOTPWebhookSecret || cfg.OTPWebhookTimeout != 3*time.Second {
 		t.Fatalf("webhook config = %#v", cfg)
 	}
 }
@@ -1076,7 +1119,7 @@ func TestLoadEmailSignupAloneWebhookDoesNotRequireSMTP(t *testing.T) {
 	t.Setenv("TELESRV_EMAIL_SIGNUP_ENABLE", "true")
 	t.Setenv("TELESRV_EMAIL_CODE_DELIVERY_PROVIDER", "webhook")
 	t.Setenv("TELESRV_OTP_WEBHOOK_URL", "https://otp.example.test/v1/deliveries")
-	t.Setenv("TELESRV_OTP_WEBHOOK_SECRET", "test-secret")
+	t.Setenv("TELESRV_OTP_WEBHOOK_SECRET", testOTPWebhookSecret)
 	t.Setenv("TELESRV_OTP_WEBHOOK_TIMEOUT", "3s")
 	t.Setenv("TELESRV_SMTP_HOST", "")
 
@@ -1088,10 +1131,31 @@ func TestLoadEmailSignupAloneWebhookDoesNotRequireSMTP(t *testing.T) {
 func TestLoadPhoneWebhookRequiresValidURL(t *testing.T) {
 	disableDefaultConfigFile(t)
 	t.Setenv("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "webhook")
+	t.Setenv("TELESRV_OTP_WEBHOOK_SECRET", testOTPWebhookSecret)
 	t.Setenv("TELESRV_OTP_WEBHOOK_URL", "relative/path")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load succeeded with relative OTP webhook URL")
+	}
+}
+
+func TestLoadPhoneWebhookRequiresStrongSecret(t *testing.T) {
+	disableDefaultConfigFile(t)
+	t.Setenv("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "webhook")
+	t.Setenv("TELESRV_OTP_WEBHOOK_URL", "https://otp.example.test/v1/deliveries")
+	t.Setenv("TELESRV_OTP_WEBHOOK_SECRET", "short")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load succeeded with a missing/weak OTP webhook secret")
+	}
+}
+
+func TestLoadPhoneWebhookRejectsRemoteHTTP(t *testing.T) {
+	disableDefaultConfigFile(t)
+	t.Setenv("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "webhook")
+	t.Setenv("TELESRV_OTP_WEBHOOK_URL", "http://otp.example.test/v1/deliveries")
+	t.Setenv("TELESRV_OTP_WEBHOOK_SECRET", testOTPWebhookSecret)
+	if _, err := Load(); err == nil {
+		t.Fatal("Load accepted a non-loopback HTTP OTP webhook endpoint")
 	}
 }
 
@@ -1100,6 +1164,7 @@ func TestLoadPhoneWebhookConfig(t *testing.T) {
 	t.Setenv("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "webhook")
 	t.Setenv("TELESRV_PHONE_CODE_LENGTH", "7")
 	t.Setenv("TELESRV_OTP_WEBHOOK_URL", "http://127.0.0.1:8080/otp")
+	t.Setenv("TELESRV_OTP_WEBHOOK_SECRET", testOTPWebhookSecret)
 
 	cfg, err := Load()
 	if err != nil {
@@ -1167,6 +1232,7 @@ func TestLoadAIProviders(t *testing.T) {
 
 func TestLoadTranslationConfig(t *testing.T) {
 	t.Setenv("TELESRV_CONFIG", "")
+	setLocalDevelopmentOTP(t)
 	t.Setenv("TELESRV_TRANSLATION_ENABLED", "true")
 	t.Setenv("TELESRV_TRANSLATION_PROVIDERS", "openai,gemini")
 	t.Setenv("TELESRV_TRANSLATION_TIMEOUT", "9s")
@@ -1186,6 +1252,7 @@ func TestLoadTranslationConfig(t *testing.T) {
 
 func TestLoadStorySparseProjectionCacheConfig(t *testing.T) {
 	t.Setenv("TELESRV_CONFIG", "")
+	setLocalDevelopmentOTP(t)
 	t.Setenv("TELESRV_STORY_ACTIVE_PEER_CACHE_MAX", "1234")
 	t.Setenv("TELESRV_STORY_HIDDEN_LIST_CACHE_MAX", "2345")
 	t.Setenv("TELESRV_STORY_HIDDEN_LIST_CACHE_BYTES_MAX", "3456")
@@ -1214,6 +1281,7 @@ TELESRV_PUBLIC_APP_NAME=Example Chat
 TELESRV_PUBLIC_LINK_WEB_ADDR=127.0.0.1:2401
 `)
 	t.Setenv("TELESRV_CONFIG", path)
+	setLocalDevelopmentOTP(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -1398,6 +1466,7 @@ TELESRV_ADMIN_API_ADDR=127.0.0.1:2599
 TELESRV_PUBLIC_LINK_WEB_ADDR=127.0.0.1:2401
 `)
 	t.Setenv("TELESRV_CONFIG", path)
+	setLocalDevelopmentOTP(t)
 	t.Setenv("TELESRV_DEBUG_ADDR", "")
 	t.Setenv("TELESRV_BOT_API_ADDR", "")
 	t.Setenv("TELESRV_ADMIN_API_ADDR", "")
@@ -1416,6 +1485,7 @@ func TestLoadEnvironmentOverridesConfigFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "telesrv.env")
 	writeConfigFile(t, path, `TELESRV_MAPBOX_TOKEN=file-token`)
 	t.Setenv("TELESRV_CONFIG", path)
+	setLocalDevelopmentOTP(t)
 	t.Setenv("TELESRV_MAPBOX_TOKEN", "env-token")
 
 	cfg, err := Load()
@@ -1439,6 +1509,7 @@ func TestLoadRejectsNonTelesrvConfigKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "telesrv.env")
 	writeConfigFile(t, path, `MAPBOX_TOKEN=file-token`)
 	t.Setenv("TELESRV_CONFIG", path)
+	setLocalDevelopmentOTP(t)
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load succeeded with unsupported config key, want error")
@@ -1725,4 +1796,35 @@ func writeConfigFile(t *testing.T, path, body string) {
 func disableDefaultConfigFile(t *testing.T) {
 	t.Helper()
 	t.Setenv("TELESRV_CONFIG", "")
+	setLocalDevelopmentOTP(t)
+}
+
+func setLocalDevelopmentOTP(t *testing.T) {
+	t.Helper()
+	t.Setenv("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "development")
+	t.Setenv("TELESRV_DEV_AUTH_CODE", "12345")
+}
+
+func TestLoadDonationsDisabledByDefaultAndExplicitOptIn(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		env  string
+		want bool
+	}{
+		{name: "default disabled", env: "", want: false},
+		{name: "explicit opt in", env: "true", want: true},
+		{name: "explicit opt out", env: "false", want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			disableDefaultConfigFile(t)
+			t.Setenv("TELESRV_DONATIONS_ENABLED", test.env)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.DonationsEnabled != test.want {
+				t.Fatalf("DonationsEnabled = %v, want %v", cfg.DonationsEnabled, test.want)
+			}
+		})
+	}
 }

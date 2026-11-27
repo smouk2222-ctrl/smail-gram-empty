@@ -170,10 +170,11 @@ type Config struct {
 	TelegramLoginSweepInterval     time.Duration
 	TelegramLoginSweepBatch        int
 	// Admin UI 独立进程配置项保留在统一配置中，cmd/telesrv-admin 也按同名 env 读取。
-	AdminUIAddr     string
-	AdminUIPassword string
-	AdminUIToken    string
-	AdminSessionKey string
+	AdminUIAddr         string
+	AdminUIPassword     string
+	AdminUIToken        string
+	AdminSessionKey     string
+	AdminUICookieSecure bool
 	// AdminUIPermissions is the permission set granted to a panel session that
 	// authenticated with TELESRV_ADMIN_UI_PASSWORD / _TOKEN. The single entry "*"
 	// means "every permission" and is the shipped default, so enabling RBAC never
@@ -212,7 +213,7 @@ type Config struct {
 	PostgresMaxConns int
 	// PostgresMinConns 是启动时预热的 pgxpool 连接数，降低 TDesktop 冷启动并发 RPC 的建连等待。
 	PostgresMinConns int
-	// DevAuthCode 是开发固定验证码；生产短信/风控不在当前范围内。
+	// DevAuthCode 是仅用于显式 development provider 的固定验证码；没有默认值。
 	DevAuthCode string
 	// WelcomeMessagePhoneTemplate/WelcomeMessageEmailTemplate are the
 	// fallback templates for the 777000 login-notification message sent on
@@ -265,8 +266,8 @@ type Config struct {
 	// help.getAppConfig 的 email_signup_phone_prefixes 下发给客户端，管理员
 	// 改动此列表不需要客户端升级。
 	EmailSignupPhonePrefixes []string
-	// PhoneCodeDeliveryProvider 选择普通登录/注册与改号验证码的投递方式：
-	// development 保留固定码与 777000 app-code；webhook 使用随机 SMS code。
+	// PhoneCodeDeliveryProvider 选择普通登录/注册与改号验证码的投递方式。
+	// 必须显式选择 development（仅限隔离本地测试）或 webhook；没有安全默认值。
 	PhoneCodeDeliveryProvider string
 	// EmailCodeDeliveryProvider 选择登录邮箱与邮箱 setup/change 的投递方式
 	// （login email 与 email-signup 共用同一个开关，见 EmailSignupEnable）。
@@ -736,7 +737,7 @@ type Config struct {
 	// it skips wallet provisioning entirely and leaves @premiumbot's
 	// /deposit reporting itself unavailable -- an already-provisioned
 	// wallet and its funds are untouched, just dormant, so re-enabling
-	// later picks up exactly where it left off. True by default.
+	// later picks up exactly where it left off. False by default; operators must opt in.
 	DonationsEnabled bool
 	// UpdateCheckEnabled lets the admin panel ask GitHub once a day whether a
 	// newer OwpenGram server release exists and show a banner if so
@@ -1108,6 +1109,7 @@ func Load() (Config, error) {
 		AdminUIPermissions:             envListOr("TELESRV_ADMIN_UI_PERMISSIONS", []string{adminPermissionAll}),
 		AdminScopedTokens:              adminScopedTokens,
 		AdminUIAddr:                    envOr("TELESRV_ADMIN_UI_ADDR", "127.0.0.1:2600"),
+		AdminUICookieSecure:            envBoolOr("TELESRV_ADMIN_UI_COOKIE_SECURE", false),
 		AdminUIPassword:                envOr("TELESRV_ADMIN_UI_PASSWORD", ""),
 		AdminUIToken:                   envOr("TELESRV_ADMIN_UI_TOKEN", ""),
 		AdminSessionKey:                envOr("TELESRV_ADMIN_SESSION_KEY", ""),
@@ -1123,7 +1125,7 @@ func Load() (Config, error) {
 		PostgresMaxConns: envIntOr("TELESRV_POSTGRES_MAX_CONNS", 50),
 		PostgresMinConns: envIntOr("TELESRV_POSTGRES_MIN_CONNS", 16),
 
-		DevAuthCode:                 envOr("TELESRV_DEV_AUTH_CODE", "12345"),
+		DevAuthCode:                 strings.TrimSpace(envOr("TELESRV_DEV_AUTH_CODE", "")),
 		WelcomeMessagePhoneTemplate: envOr("TELESRV_WELCOME_MESSAGE_PHONE_TEMPLATE", domain.DefaultWelcomeMessagePhoneTemplate),
 		WelcomeMessageEmailTemplate: envOr("TELESRV_WELCOME_MESSAGE_EMAIL_TEMPLATE", domain.DefaultWelcomeMessageEmailTemplate),
 		LoginCodeMessageTemplate:    envOr("TELESRV_LOGIN_CODE_MESSAGE_TEMPLATE", domain.DefaultLoginCodeMessageTemplate),
@@ -1138,10 +1140,10 @@ func Load() (Config, error) {
 		EmailSignupEnable:           envBoolOr("TELESRV_EMAIL_SIGNUP_ENABLE", false),
 		EmailSignupPhonePrefixes:    envListOr("TELESRV_EMAIL_SIGNUP_PHONE_PREFIXES", []string{"888"}),
 		LoginEmailCodeLength:        envIntOr("TELESRV_LOGIN_EMAIL_CODE_LENGTH", 6),
-		PhoneCodeDeliveryProvider:   strings.ToLower(strings.TrimSpace(envOr("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", "development"))),
+		PhoneCodeDeliveryProvider:   strings.ToLower(strings.TrimSpace(envOr("TELESRV_PHONE_CODE_DELIVERY_PROVIDER", ""))),
 		EmailCodeDeliveryProvider:   strings.ToLower(strings.TrimSpace(envOr("TELESRV_EMAIL_CODE_DELIVERY_PROVIDER", "smtp"))),
 		OTPWebhookURL:               envOr("TELESRV_OTP_WEBHOOK_URL", ""),
-		OTPWebhookSecret:            envOr("TELESRV_OTP_WEBHOOK_SECRET", ""),
+		OTPWebhookSecret:            strings.TrimSpace(envOr("TELESRV_OTP_WEBHOOK_SECRET", "")),
 		OTPWebhookTimeout:           envDurationOr("TELESRV_OTP_WEBHOOK_TIMEOUT", 5*time.Second),
 		SMTPHost:                    envOr("TELESRV_SMTP_HOST", ""),
 		SMTPPort:                    envIntOr("TELESRV_SMTP_PORT", 587),
@@ -1158,12 +1160,12 @@ func Load() (Config, error) {
 		BlobBackendKind:                   strings.ToLower(strings.TrimSpace(envOr("TELESRV_BLOB_BACKEND", ""))),
 		BlobDir:                           envOr("TELESRV_BLOB_DIR", "data/blobs"),
 		BlobStagingDir:                    envOr("TELESRV_BLOB_STAGING_DIR", "data/blob-staging"),
-		S3Endpoint:                        envOr("TELESRV_S3_ENDPOINT", "127.0.0.1:9000"), // 同理避开 localhost→IPv6 回退延迟
+		S3Endpoint:                        envOr("TELESRV_S3_ENDPOINT", ""),
 		S3Region:                          envOr("TELESRV_S3_REGION", "us-east-1"),
-		S3Bucket:                          envOr("TELESRV_S3_BUCKET", "owpengram-media"),
-		S3AccessKeyID:                     envOr("TELESRV_S3_ACCESS_KEY_ID", "owpengram"),
-		S3SecretAccessKey:                 envOr("TELESRV_S3_SECRET_ACCESS_KEY", "owpengram123"),
-		S3UseSSL:                          envBoolOr("TELESRV_S3_USE_SSL", false),
+		S3Bucket:                          envOr("TELESRV_S3_BUCKET", ""),
+		S3AccessKeyID:                     envOr("TELESRV_S3_ACCESS_KEY_ID", ""),
+		S3SecretAccessKey:                 envOr("TELESRV_S3_SECRET_ACCESS_KEY", ""),
+		S3UseSSL:                          envBoolOr("TELESRV_S3_USE_SSL", true),
 		S3PathStyle:                       envBoolOr("TELESRV_S3_PATH_STYLE", true),
 		S3CreateBucket:                    envBoolOr("TELESRV_S3_CREATE_BUCKET", false),
 		StorageLowSpaceGuardEnable:        envBoolOr("TELESRV_STORAGE_LOW_SPACE_GUARD_ENABLE", true),
@@ -1324,7 +1326,7 @@ func Load() (Config, error) {
 		RatingActivityCap:                 envInt64Or("TELESRV_RATING_ACTIVITY_CAP", domain.DefaultAccountRatingWeights().ActivityCap),
 		PremiumSweepInterval:              envDurationOr("TELESRV_PREMIUM_SWEEP_INTERVAL", time.Minute),
 		PremiumSweepBatch:                 envIntOr("TELESRV_PREMIUM_SWEEP_BATCH", 500),
-		DonationsEnabled:                  envBoolOr("TELESRV_DONATIONS_ENABLED", true),
+		DonationsEnabled:                  envBoolOr("TELESRV_DONATIONS_ENABLED", false),
 		UpdateCheckEnabled:                envBoolOr("TELESRV_UPDATE_CHECK", true),
 		DonationWalletKeyPath:             envOr("TELESRV_DONATION_WALLET_KEY_PATH", "data/donation_wallet.key"),
 		DonationWalletKey:                 strings.TrimSpace(envAllowEmptyOr("TELESRV_DONATION_WALLET_KEY", "")),
@@ -2052,9 +2054,13 @@ func validateLoginEmailConfig(cfg Config) error {
 		}
 	}
 	switch cfg.PhoneCodeDeliveryProvider {
-	case "development", "webhook":
+	case "development":
+		if len(cfg.DevAuthCode) < 4 || len(cfg.DevAuthCode) > 10 || !isDigitsOnly(cfg.DevAuthCode) {
+			return fmt.Errorf("TELESRV_DEV_AUTH_CODE must be 4-10 digits when TELESRV_PHONE_CODE_DELIVERY_PROVIDER=development")
+		}
+	case "webhook":
 	default:
-		return fmt.Errorf("TELESRV_PHONE_CODE_DELIVERY_PROVIDER must be development or webhook")
+		return fmt.Errorf("TELESRV_PHONE_CODE_DELIVERY_PROVIDER must be explicitly set to development or webhook")
 	}
 	switch cfg.EmailCodeDeliveryProvider {
 	case "smtp", "webhook":
@@ -2069,12 +2075,18 @@ func validateLoginEmailConfig(cfg Config) error {
 	webhookEnabled := cfg.PhoneCodeDeliveryProvider == "webhook" ||
 		((cfg.LoginEmailEnable || cfg.EmailSignupEnable) && cfg.EmailCodeDeliveryProvider == "webhook")
 	if webhookEnabled {
+		if len([]byte(cfg.OTPWebhookSecret)) < 32 {
+			return fmt.Errorf("TELESRV_OTP_WEBHOOK_SECRET must contain at least 32 bytes when webhook delivery is enabled")
+		}
 		if cfg.OTPWebhookTimeout <= 0 {
 			return fmt.Errorf("TELESRV_OTP_WEBHOOK_TIMEOUT must be positive")
 		}
 		u, err := url.Parse(strings.TrimSpace(cfg.OTPWebhookURL))
 		if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			return fmt.Errorf("TELESRV_OTP_WEBHOOK_URL must be an absolute http(s) URL without userinfo")
+		}
+		if u.Scheme == "http" && !isLoopbackHostPort(u.Host) {
+			return fmt.Errorf("TELESRV_OTP_WEBHOOK_URL must use https unless the endpoint is loopback")
 		}
 	}
 	if (!cfg.LoginEmailEnable && !cfg.EmailSignupEnable) || cfg.EmailCodeDeliveryProvider == "webhook" {

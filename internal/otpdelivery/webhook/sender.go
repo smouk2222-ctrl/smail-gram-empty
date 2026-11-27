@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -50,23 +51,43 @@ func New(cfg Config) (*Sender, error) {
 	if endpoint.Host == "" || endpoint.User != nil {
 		return nil, fmt.Errorf("OTP webhook URL must contain a host and no userinfo")
 	}
+	if endpoint.Scheme == "http" && !isLoopbackHost(endpoint.Hostname()) {
+		return nil, fmt.Errorf("OTP webhook URL must use HTTPS unless the host is loopback")
+	}
+	secret := strings.TrimSpace(cfg.Secret)
+	if len([]byte(secret)) < 32 {
+		return nil, fmt.Errorf("OTP webhook secret must contain at least 32 bytes")
+	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Second
 	}
 	client := cfg.Client
 	if client == nil {
-		client = &http.Client{
-			Timeout: cfg.Timeout,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
+		client = &http.Client{Timeout: cfg.Timeout}
+	} else {
+		// Do not mutate a caller-owned client, but enforce the same redirect
+		// policy for injected clients. OTP codes and signatures must never be
+		// forwarded to a redirect target.
+		clientCopy := *client
+		client = &clientCopy
+	}
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Sender{endpoint: endpoint, secret: []byte(cfg.Secret), client: client, logger: logger}, nil
+	return &Sender{endpoint: endpoint, secret: []byte(secret), client: client, logger: logger}, nil
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 type requestBody struct {
@@ -121,9 +142,7 @@ func (s *Sender) Deliver(ctx context.Context, delivery otpdelivery.Request) (otp
 	req.Header.Set("Idempotency-Key", delivery.DeliveryID)
 	timestamp := fmt.Sprint(now.Unix())
 	req.Header.Set("X-Telesrv-Timestamp", timestamp)
-	if len(s.secret) > 0 {
-		req.Header.Set("X-Telesrv-Signature", signature(s.secret, timestamp, body))
-	}
+	req.Header.Set("X-Telesrv-Signature", signature(s.secret, timestamp, body))
 
 	resp, err := s.client.Do(req)
 	if err != nil {

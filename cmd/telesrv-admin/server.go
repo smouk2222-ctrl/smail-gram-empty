@@ -47,6 +47,9 @@ type server struct {
 	// stats answers the overview/Storage aggregates from memory; see
 	// statscache.go. nil without a read store.
 	stats *statsCaches
+	// loginAttempts is a bounded, zero-value-ready throttle for unauthenticated
+	// panel logins. Multi-replica deployments also need proxy-level limiting.
+	loginAttempts loginAttemptLimiter
 }
 
 func newServer(cfg uiConfig, read *readStore, hostStats *hoststats.Poller) (*server, error) {
@@ -298,10 +301,10 @@ func (s *server) handleApp(w http.ResponseWriter, r *http.Request) {
 }
 
 type loginRequest struct {
-	// Username selects a named account in admin_console_users. Left empty, the
-	// credential is checked against TELESRV_ADMIN_UI_PASSWORD / _TOKEN instead,
-	// which keeps the pre-accounts login working and doubles as the way back in
-	// if the database is unreachable or every named account is locked out.
+	// Username selects a named account in admin_console_users. The built-in
+	// break-glass credential is selected explicitly with username "owpengram",
+	// and remains available if the database is unreachable or named accounts
+	// are locked out.
 	Username string `json:"username"`
 	Secret   string `json:"secret"`
 }
@@ -323,6 +326,16 @@ func (s *server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	allowed, retryAfter := s.loginAttempts.allow(r.RemoteAddr, req.Username, time.Now())
+	if !allowed {
+		seconds := int(retryAfter.Seconds())
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		writeAPIError(w, http.StatusTooManyRequests, "too many login attempts; try again later")
+		return
+	}
 	identity, ok := s.authenticateLogin(r.Context(), req)
 	if !ok {
 		// One message and one status for every failure mode -- unknown account,
@@ -337,7 +350,7 @@ func (s *server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	permissions := newPanelPermissions(identity.permissions)
-	value, err := signSession(s.cfg.SessionKey, sessionClaims{
+	claims := sessionClaims{
 		Actor:       identity.actor,
 		UserID:      identity.userID,
 		Epoch:       identity.epoch,
@@ -345,7 +358,15 @@ func (s *server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 		Nonce:       newCommandID("sess"),
 		Permissions: permissions.List(),
 		CSRF:        csrfToken,
-	})
+	}
+	if identity.userID == 0 {
+		claims.BreakGlassVersion = s.breakGlassSessionVersion()
+		if claims.BreakGlassVersion == "" {
+			writeAPIError(w, http.StatusInternalServerError, "break-glass session configuration is invalid")
+			return
+		}
+	}
+	value, err := signSession(s.cfg.SessionKey, claims)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -356,9 +377,10 @@ func (s *server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   int(sessionTTL.Seconds()),
 		HttpOnly: true,
+		Secure:   s.cfg.CookieSecure || r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 	})
-	setCSRFCookie(w, csrfToken, sessionTTL)
+	setCSRFCookie(w, csrfToken, sessionTTL, s.cfg.CookieSecure || r.TLS != nil)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"actor":                         identity.actor,
 		"permissions":                   permissions.List(),
@@ -388,8 +410,8 @@ func (s *server) validSecret(secret string) bool {
 	return false
 }
 
-func (s *server) handleAPILogout(w http.ResponseWriter, _ *http.Request) {
-	clearSessionCookie(w)
+func (s *server) handleAPILogout(w http.ResponseWriter, r *http.Request) {
+	clearSessionCookie(w, s.cfg.CookieSecure || r.TLS != nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

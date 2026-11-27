@@ -102,6 +102,7 @@ type uiConfig struct {
 	Password      string
 	Token         string
 	SessionKey    []byte
+	CookieSecure  bool
 	// DiskStatsPath points the dashboard host-disk sampler at the local path
 	// that matters for the selected blob backend: permanent localfs storage or
 	// the S3 upload spool.
@@ -118,7 +119,7 @@ type uiConfig struct {
 	// the "Third-party marks" nav entry and its routes.
 	HideThirdPartyVerification bool
 	// DonationsEnabled mirrors config.DonationsEnabled (TELESRV_DONATIONS_ENABLED,
-	// default true): while false, every donations.* route refuses with 404
+	// default false): while false, every donations.* route refuses with 404
 	// regardless of session permissions, and the session/login response tells
 	// the frontend to hide the "Donations" nav entry and its route. The
 	// server-side feature itself is already a no-op when disabled (see
@@ -216,6 +217,7 @@ func loadConfig() (uiConfig, error) {
 		Password:                   appCfg.AdminUIPassword,
 		Token:                      appCfg.AdminUIToken,
 		SessionKey:                 sum[:],
+		CookieSecure:               appCfg.AdminUICookieSecure,
 		DiskStatsPath:              dashboardDiskPath(appCfg),
 		Permissions:                appCfg.AdminUIPermissions,
 		HideThirdPartyVerification: appCfg.HideThirdPartyVerification,

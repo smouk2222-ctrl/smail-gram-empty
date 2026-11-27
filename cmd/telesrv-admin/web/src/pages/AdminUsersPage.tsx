@@ -267,11 +267,12 @@ function OperatorModal({
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
   const isEdit = Boolean(existing);
 
-  // Only the shape the server insists on: a username it will accept, and a
-  // password that is actually present. Length is the operator's business.
+  // Keep the form aligned with the server policy: named admin passwords are
+  // single-factor credentials and must be at least 15 Unicode characters.
+  const passwordLength = Array.from(password).length;
   const incomplete = isEdit
     ? false
-    : username.trim().length < 3 || password.trim() === "";
+    : username.trim().length < 3 || passwordLength < 15;
 
   return createPortal(
     <div className="modal-backdrop" role="presentation">
@@ -299,7 +300,7 @@ function OperatorModal({
                 />
               </label>
               <label className="duration-field">
-                <span>{"Password"}</span>
+                <span>{"Password (at least 15 characters)"}</span>
                 <input
                   type="password"
                   value={password}
@@ -391,7 +392,7 @@ function PasswordModal({
 
         <div className="command-body">
           <label className="duration-field">
-            <span>{"New password"}</span>
+            <span>{"New password (at least 15 characters)"}</span>
             <input
               autoFocus
               type="password"
@@ -409,7 +410,7 @@ function PasswordModal({
             label={"Set password"}
             path={"/api/actions/set-admin-operator-password"}
             tone="primary"
-            disabled={password.trim() === ""}
+            disabled={Array.from(password).length < 15}
             icon={<KeyRound size={15} />}
             payload={() => ({ id: operator.id, password })}
             onDone={onDone}
